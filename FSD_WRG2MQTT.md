@@ -1,16 +1,16 @@
 # Functional Specification Document (FSD)
 
-## Project: WRGII2MQTT
+## Project: WRG2MQTT
 
 **Version:** 1.0  
 **Date:** 2026-04-01  
-**Repository:** https://github.com/1984ozone1984/meltem_wrgII_2_MQTT
+**Repository:** https://github.com/1984ozone1984/meltem_wrg2_2_MQTT
 
 ---
 
 ## 1. Overview
 
-**Project Name:** WRGII2MQTT  
+**Project Name:** WRG2MQTT  
 **Goal:** Read sensor data and control a Meltem WRG-II heat recovery ventilation unit via Modbus RTU (RS485), and expose it to Home Assistant over MQTT using an ESP32-based device.
 
 The system bridges the proprietary RS485/Modbus interface of the Meltem WRG-II to the MQTT protocol over WiFi, enabling full integration with Home Assistant — including sensor readings, device control, and automatic entity discovery.
@@ -83,7 +83,7 @@ The system bridges the proprietary RS485/Modbus interface of the Meltem WRG-II t
 | `wifi_manager` | WiFi connection, reconnection logic |
 | `mqtt_client` | MQTT connect/publish/subscribe, reconnect logic |
 | `modbus_rtu` | UART driver, Modbus RTU framing, CRC, retry/timeout |
-| `wrgii_driver` | WRG-II register map, read/write abstraction |
+| `wrg2_driver` | WRG-II register map, read/write abstraction |
 | `ha_discovery` | Home Assistant MQTT discovery payload generation |
 | `ota_manager` | OTA firmware update handling |
 | `logger` | Unified logging over UART and optionally MQTT |
@@ -126,7 +126,7 @@ MQTT Subscribe (control topics)
 #### Topic Structure
 
 ```
-wrgii/
+wrg2/
   status/
     temperature_supply        # Supply air temperature (°C)
     temperature_extract       # Extract air temperature (°C)
@@ -152,7 +152,7 @@ wrgii/
 |-----------|--------|
 | QoS | 1 (at least once) |
 | Retain | Yes for status and availability |
-| LWT | `wrgii/availability` → `"offline"` |
+| LWT | `wrg2/availability` → `"offline"` |
 | Auth | Optional (username/password via NVS) |
 | TLS | Optional (configurable) |
 
@@ -163,12 +163,12 @@ wrgii/
 Discovery messages are published once on connect to enable automatic entity creation in Home Assistant.
 
 ```
-homeassistant/sensor/wrgii_supply_temp/config
-homeassistant/sensor/wrgii_extract_temp/config
-homeassistant/sensor/wrgii_fan_speed/config
-homeassistant/binary_sensor/wrgii_bypass/config
-homeassistant/fan/wrgii_fan/config
-homeassistant/select/wrgii_mode/config
+homeassistant/sensor/wrg2_supply_temp/config
+homeassistant/sensor/wrg2_extract_temp/config
+homeassistant/sensor/wrg2_fan_speed/config
+homeassistant/binary_sensor/wrg2_bypass/config
+homeassistant/fan/wrg2_fan/config
+homeassistant/select/wrg2_mode/config
 ```
 
 #### Entities
@@ -186,9 +186,9 @@ homeassistant/select/wrgii_mode/config
 
 | Function | MQTT Topic | Modbus Action |
 |----------|-----------|---------------|
-| Set fan level | `wrgii/control/fan_level/set` | Write Single Register (0x06) |
-| Set bypass | `wrgii/control/bypass/set` | Write Single Register (0x06) |
-| Set operating mode | `wrgii/control/mode/set` | Write Single Register (0x06) |
+| Set fan level | `wrg2/control/fan_level/set` | Write Single Register (0x06) |
+| Set bypass | `wrg2/control/bypass/set` | Write Single Register (0x06) |
+| Set operating mode | `wrg2/control/mode/set` | Write Single Register (0x06) |
 
 ---
 

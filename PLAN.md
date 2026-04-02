@@ -1,6 +1,6 @@
-# WRGII2MQTT — Implementation Plan
+# WRG2MQTT — Implementation Plan
 
-**Based on:** FSD_WRGII2MQTT.md v1.0  
+**Based on:** FSD_WRG2MQTT.md v1.0  
 **Date:** 2026-04-01
 
 ---
@@ -14,7 +14,7 @@ The project starts from an empty repository. ESP-IDF v5.4 targeting `esp32s3`. T
 ## 1. Project Directory Structure
 
 ```
-wrgii2mqtt/
+wrg2mqtt/
 ├── CMakeLists.txt                  # Top-level: cmake_minimum_required + project()
 ├── sdkconfig.defaults              # Baseline Kconfig overrides (checked in)
 ├── partitions.csv                  # Custom partition table (OTA requires 2 app slots)
@@ -31,7 +31,7 @@ wrgii2mqtt/
     ├── ha_discovery/               # Build + publish HA discovery JSON payloads
     ├── ota_manager/                # HTTPS OTA task, MQTT trigger handler
     ├── modbus_rtu/                 # Phase 2+: UART driver, RTU framing, CRC, retry
-    └── wrgii_driver/               # Phase 2+: WRG-II register map, read/write API
+    └── wrg2_driver/               # Phase 2+: WRG-II register map, read/write API
 ```
 
 ### Custom Partition Table (mandatory for OTA)
@@ -100,7 +100,7 @@ void app_main(void) {
 
 ### Step 1.2 — `config_manager` Component
 
-**NVS namespace:** `"wrgii_cfg"`
+**NVS namespace:** `"wrg2_cfg"`
 
 **Global config struct:**
 ```c
@@ -113,9 +113,9 @@ typedef struct {
     uint8_t mb_slave_id;    // default 1
     uint32_t mb_baud;       // default 9600
     uint32_t poll_interval; // default 10 (seconds)
-} wrgii_config_t;
+} wrg2_config_t;
 
-extern wrgii_config_t g_config;
+extern wrg2_config_t g_config;
 ```
 
 **NVS Key Map:**
@@ -155,7 +155,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
     .broker.address.uri                      = g_config.mqtt_url,
     .credentials.username                    = g_config.mqtt_user,
     .credentials.authentication.password     = g_config.mqtt_pass,
-    .session.last_will.topic                 = "wrgii/availability",
+    .session.last_will.topic                 = "wrg2/availability",
     .session.last_will.msg                   = "offline",
     .session.last_will.qos                   = 1,
     .session.last_will.retain                = 1,
@@ -164,7 +164,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
 ```
 
 **On `MQTT_EVENT_CONNECTED`:**
-1. Publish `wrgii/availability` → `"online"` (QoS 1, retain)
+1. Publish `wrg2/availability` → `"online"` (QoS 1, retain)
 2. Re-subscribe to all control topics
 3. Call `ha_discovery_publish()`
 
@@ -181,18 +181,18 @@ Discovery published once on MQTT connect. All payloads: QoS 1, retain=1.
 
 | HA Topic | Entity Type | State Topic |
 |----------|-------------|-------------|
-| `homeassistant/sensor/wrgii_supply_temp/config` | sensor | `wrgii/status/temperature_supply` |
-| `homeassistant/sensor/wrgii_extract_temp/config` | sensor | `wrgii/status/temperature_extract` |
-| `homeassistant/sensor/wrgii_fan_speed/config` | sensor | `wrgii/status/fan_speed` |
-| `homeassistant/binary_sensor/wrgii_bypass/config` | binary_sensor | `wrgii/status/bypass_state` |
-| `homeassistant/fan/wrgii_fan/config` | fan | `wrgii/status/fan_speed` |
-| `homeassistant/select/wrgii_mode/config` | select | `wrgii/status/operating_mode` |
+| `homeassistant/sensor/wrg2_supply_temp/config` | sensor | `wrg2/status/temperature_supply` |
+| `homeassistant/sensor/wrg2_extract_temp/config` | sensor | `wrg2/status/temperature_extract` |
+| `homeassistant/sensor/wrg2_fan_speed/config` | sensor | `wrg2/status/fan_speed` |
+| `homeassistant/binary_sensor/wrg2_bypass/config` | binary_sensor | `wrg2/status/bypass_state` |
+| `homeassistant/fan/wrg2_fan/config` | fan | `wrg2/status/fan_speed` |
+| `homeassistant/select/wrg2_mode/config` | select | `wrg2/status/operating_mode` |
 
 All payloads include:
 ```json
-"availability_topic": "wrgii/availability",
+"availability_topic": "wrg2/availability",
 "device": {
-  "identifiers": ["wrgii2mqtt"],
+  "identifiers": ["wrg2mqtt"],
   "name": "Meltem WRG-II",
   "manufacturer": "Meltem",
   "model": "WRG-II"
@@ -201,7 +201,7 @@ All payloads include:
 
 ### Step 1.6 — `ota_manager` Component
 
-- **Trigger:** MQTT topic `wrgii/ota/trigger`, payload = firmware URL
+- **Trigger:** MQTT topic `wrg2/ota/trigger`, payload = firmware URL
 - ESP-IDF API: `esp_https_ota()` from `esp_https_ota.h`
 - OTA runs in a dedicated task (8 KB stack); on success calls `esp_restart()`
 - Phase 1: plain HTTP (local LAN). TLS can be added later.
@@ -225,11 +225,11 @@ void polling_task(void *arg) {
     while (1) {
         esp_task_wdt_reset();
         if (mqtt_manager_is_connected()) {
-            mqtt_publish("wrgii/status/temperature_supply", "21.5", 1, 1);
-            mqtt_publish("wrgii/status/temperature_extract", "18.0", 1, 1);
-            mqtt_publish("wrgii/status/fan_speed", "2", 1, 1);
-            mqtt_publish("wrgii/status/bypass_state", "OFF", 1, 1);
-            mqtt_publish("wrgii/status/operating_mode", "auto", 1, 1);
+            mqtt_publish("wrg2/status/temperature_supply", "21.5", 1, 1);
+            mqtt_publish("wrg2/status/temperature_extract", "18.0", 1, 1);
+            mqtt_publish("wrg2/status/fan_speed", "2", 1, 1);
+            mqtt_publish("wrg2/status/bypass_state", "OFF", 1, 1);
+            mqtt_publish("wrg2/status/operating_mode", "auto", 1, 1);
         }
         vTaskDelay(pdMS_TO_TICKS(g_config.poll_interval * 1000));
     }
@@ -240,12 +240,12 @@ void polling_task(void *arg) {
 
 - [ ] `idf.py build` succeeds with custom partition table
 - [ ] Device connects to WiFi, logs IP address
-- [ ] Device connects to MQTT, publishes `wrgii/availability` = `"online"`
+- [ ] Device connects to MQTT, publishes `wrg2/availability` = `"online"`
 - [ ] All 6 HA entities auto-discovered
 - [ ] Mock sensor values appear in HA at poll interval
 - [ ] WiFi reconnects automatically after router restart
 - [ ] MQTT reconnects automatically after broker restart
-- [ ] OTA update via `wrgii/ota/trigger` topic works
+- [ ] OTA update via `wrg2/ota/trigger` topic works
 - [ ] No credentials in source code
 
 ---
@@ -331,21 +331,21 @@ esp_err_t modbus_rtu_write_register(uint8_t slave, uint16_t addr,
                                      uint16_t value);  // Phase 3
 ```
 
-### Step 2.3 — `wrgii_driver` Component
+### Step 2.3 — `wrg2_driver` Component
 
-**`wrgii_registers.h`** (addresses TBD from Meltem PDF):
+**`wrg2_registers.h`** (addresses TBD from Meltem PDF):
 ```c
-#define WRGII_REG_TEMP_SUPPLY       0x0000  // Supply air temp (x10 °C) — VERIFY
-#define WRGII_REG_TEMP_EXTRACT      0x0001  // Extract air temp (x10 °C) — VERIFY
-#define WRGII_REG_FAN_SPEED         0x0002  // Fan speed — VERIFY
-#define WRGII_REG_BYPASS_STATE      0x0003  // 0=closed, 1=open — VERIFY
-#define WRGII_REG_OPERATING_MODE    0x0004  // Operating mode — VERIFY
-#define WRGII_REG_FAN_LEVEL_SET     0x0010  // Writable: fan level — VERIFY
-#define WRGII_REG_BYPASS_SET        0x0011  // Writable: bypass — VERIFY
-#define WRGII_REG_MODE_SET          0x0012  // Writable: mode — VERIFY
+#define WRG2_REG_TEMP_SUPPLY       0x0000  // Supply air temp (x10 °C) — VERIFY
+#define WRG2_REG_TEMP_EXTRACT      0x0001  // Extract air temp (x10 °C) — VERIFY
+#define WRG2_REG_FAN_SPEED         0x0002  // Fan speed — VERIFY
+#define WRG2_REG_BYPASS_STATE      0x0003  // 0=closed, 1=open — VERIFY
+#define WRG2_REG_OPERATING_MODE    0x0004  // Operating mode — VERIFY
+#define WRG2_REG_FAN_LEVEL_SET     0x0010  // Writable: fan level — VERIFY
+#define WRG2_REG_BYPASS_SET        0x0011  // Writable: bypass — VERIFY
+#define WRG2_REG_MODE_SET          0x0012  // Writable: mode — VERIFY
 ```
 
-**`wrgii_data_t` struct:**
+**`wrg2_data_t` struct:**
 ```c
 typedef struct {
     float    temp_supply;
@@ -353,14 +353,14 @@ typedef struct {
     uint16_t fan_speed;
     bool     bypass_open;
     uint16_t operating_mode;
-} wrgii_data_t;
+} wrg2_data_t;
 ```
 
-`wrgii_read_all()` reads a contiguous block in a single FC03 request, then maps raw values (applying scaling factors from the PDF) to the struct.
+`wrg2_read_all()` reads a contiguous block in a single FC03 request, then maps raw values (applying scaling factors from the PDF) to the struct.
 
 ### Step 2.4 — Polling Task (Phase 2 — Real Data)
 
-Replace the mock `polling_task` with one that calls `wrgii_read_all()` and publishes real register values to MQTT status topics.
+Replace the mock `polling_task` with one that calls `wrg2_read_all()` and publishes real register values to MQTT status topics.
 
 ### Phase 2 Completion Checklist
 
@@ -383,10 +383,10 @@ Add to `modbus_rtu.c`. Request is 8 bytes: `[slave, 0x06, addr_hi, addr_lo, val_
 
 Subscribe at `MQTT_EVENT_CONNECTED` (QoS 1):
 ```
-wrgii/control/fan_level/set
-wrgii/control/bypass/set
-wrgii/control/mode/set
-wrgii/ota/trigger
+wrg2/control/fan_level/set
+wrg2/control/bypass/set
+wrg2/control/mode/set
+wrg2/ota/trigger
 ```
 
 **Important:** Do not block in the MQTT event callback. Post to a `QueueHandle_t`:
@@ -397,7 +397,7 @@ typedef struct {
 } ctrl_cmd_t;
 ```
 
-A `control_task` (priority 6) dequeues commands and calls `wrgii_set_*()`.
+A `control_task` (priority 6) dequeues commands and calls `wrg2_set_*()`.
 
 ### Step 3.3 — Read-After-Write Confirmation
 
@@ -420,7 +420,7 @@ After every write, immediately read back the register to confirm acceptance. Pub
 
 | # | Item | Resolution |
 |---|------|------------|
-| 1 | **Meltem Register Map** | Run `pdftotext "docs/Meltem BA-IA_M-WRG-II_P-M_E-M.pdf" -` to extract register addresses, scaling factors, and valid values. Populate `wrgii_registers.h`. |
+| 1 | **Meltem Register Map** | Run `pdftotext "docs/Meltem BA-IA_M-WRG-II_P-M_E-M.pdf" -` to extract register addresses, scaling factors, and valid values. Populate `wrg2_registers.h`. |
 | 2 | **DE/RE GPIO Assignment** | Confirm a free GPIO against `docs/XIAO_ESP32S3_Sense_Pinout.xlsx`. Candidate: GPIO2 (D0). |
 | 3 | **UART Port Conflict** | GPIO43/44 = default UART0 (console). Set `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` and use `UART_NUM_1` remapped to these pins. |
 
