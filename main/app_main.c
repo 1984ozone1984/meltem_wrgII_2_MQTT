@@ -21,11 +21,16 @@ static const char *TAG = "app_main";
  * MQTT event handler (mqtt_manager) posts commands here.
  * control_task() processes them from the Modbus task context.
  * ----------------------------------------------------------------------- */
-typedef enum { CMD_MODE, CMD_FAN, CMD_FAN_EXHAUST } cmd_type_t;
+typedef enum {
+    CMD_MODE,             /* "off" | "humidity"                  */
+    CMD_FAN_BALANCED,     /* 0-100 m³/h → mode=3, 41121=val*2   */
+    CMD_FAN_UNBAL_SUPPLY, /* 0-100 m³/h → mode=4, 41121=val*2   */
+    CMD_FAN_UNBAL_EXHAUST /* 0-100 m³/h → mode=4, 41122=val*2   */
+} cmd_type_t;
 
 typedef struct {
     cmd_type_t type;
-    char       payload[32];   /* mode string, or "N" or "N,M" for fan m³/h */
+    char       payload[32];
 } wrg2_cmd_t;
 
 static QueueHandle_t s_cmd_queue;
@@ -38,16 +43,23 @@ void wrg2_enqueue_mode(const char *payload)
     xQueueSend(s_cmd_queue, &cmd, 0);
 }
 
-void wrg2_enqueue_fan(const char *payload)
+void wrg2_enqueue_fan_balanced(const char *payload)
 {
-    wrg2_cmd_t cmd = { .type = CMD_FAN };
+    wrg2_cmd_t cmd = { .type = CMD_FAN_BALANCED };
     strncpy(cmd.payload, payload, sizeof(cmd.payload) - 1);
     xQueueSend(s_cmd_queue, &cmd, 0);
 }
 
-void wrg2_enqueue_fan_exhaust(const char *payload)
+void wrg2_enqueue_fan_unbal_supply(const char *payload)
 {
-    wrg2_cmd_t cmd = { .type = CMD_FAN_EXHAUST };
+    wrg2_cmd_t cmd = { .type = CMD_FAN_UNBAL_SUPPLY };
+    strncpy(cmd.payload, payload, sizeof(cmd.payload) - 1);
+    xQueueSend(s_cmd_queue, &cmd, 0);
+}
+
+void wrg2_enqueue_fan_unbal_exhaust(const char *payload)
+{
+    wrg2_cmd_t cmd = { .type = CMD_FAN_UNBAL_EXHAUST };
     strncpy(cmd.payload, payload, sizeof(cmd.payload) - 1);
     xQueueSend(s_cmd_queue, &cmd, 0);
 }
@@ -84,8 +96,8 @@ static void publish_status(const wrg2_data_t *d)
     PUB("wrg2/status/humidity_supply",     "%u",   d->humidity_supply);
     PUB("wrg2/status/fan_supply_m3h",      "%u",   d->fan_supply_m3h);
     PUB("wrg2/status/fan_exhaust_m3h",     "%u",   d->fan_exhaust_m3h);
-    PUB("wrg2/status/fan_level",           "%u",   d->fan_target_supply  / 2);
-    PUB("wrg2/status/fan_exhaust_level",   "%u",   d->fan_target_exhaust / 2);
+    PUB("wrg2/status/fan_supply_target",   "%u",   d->fan_target_supply  / 2);
+    PUB("wrg2/status/fan_exhaust_target",  "%u",   d->fan_target_exhaust / 2);
     PUB("wrg2/status/frost_active",        "%s",   d->frost_active ? "ON" : "OFF");
     PUB("wrg2/status/error",               "%s",   d->error_flag   ? "ON" : "OFF");
     PUB("wrg2/status/filter_due",          "%s",   d->filter_due   ? "ON" : "OFF");
@@ -160,51 +172,39 @@ static void control_task(void *arg)
         esp_err_t err = ESP_FAIL;
 
         if (cmd.type == CMD_MODE) {
-            ESP_LOGI(TAG, "control: set mode → %s", cmd.payload);
+            ESP_LOGI(TAG, "control: mode → %s", cmd.payload);
             if (strcmp(cmd.payload, "off") == 0) {
                 err = wrg2_set_mode(1, 0);
             } else if (strcmp(cmd.payload, "humidity") == 0) {
                 err = wrg2_set_mode(2, 112);
-            } else if (strcmp(cmd.payload, "manual") == 0) {
-                wrg2_data_t cur;
-                uint8_t fan = (wrg2_get_last_data(&cur) && cur.fan_target_supply)
-                              ? cur.fan_target_supply : 100;
-                err = wrg2_set_mode(3, fan);
-            } else if (strcmp(cmd.payload, "manual_unbal") == 0) {
-                wrg2_data_t cur;
-                uint8_t s = 100, e = 100;
-                if (wrg2_get_last_data(&cur)) {
-                    s = cur.fan_target_supply  ? cur.fan_target_supply  : 100;
-                    e = cur.fan_target_exhaust ? cur.fan_target_exhaust : 100;
-                }
-                err = wrg2_set_mode_unbalanced(s / 2, e / 2);
             } else {
                 ESP_LOGW(TAG, "control: unknown mode '%s'", cmd.payload);
                 continue;
             }
-        } else if (cmd.type == CMD_FAN) {
+        } else if (cmd.type == CMD_FAN_BALANCED) {
             int m3h = atoi(cmd.payload);
             if (m3h < 0) m3h = 0;
             if (m3h > 100) m3h = 100;
-            ESP_LOGI(TAG, "control: set supply fan → %d m³/h", m3h);
-            /* If currently in unbalanced mode, keep exhaust target */
-            wrg2_data_t cur;
-            if (wrg2_get_last_data(&cur) && cur.mode == 4) {
-                err = wrg2_set_mode_unbalanced((uint8_t)m3h,
-                                               cur.fan_target_exhaust / 2);
-            } else {
-                err = wrg2_set_fan_level((uint8_t)m3h);
-            }
-        } else if (cmd.type == CMD_FAN_EXHAUST) {
+            ESP_LOGI(TAG, "control: balanced fan → %d m³/h (mode=3, 41121=%d)", m3h, m3h*2);
+            err = wrg2_set_fan_level((uint8_t)m3h);
+        } else if (cmd.type == CMD_FAN_UNBAL_SUPPLY) {
             int m3h = atoi(cmd.payload);
             if (m3h < 0) m3h = 0;
             if (m3h > 100) m3h = 100;
-            ESP_LOGI(TAG, "control: set exhaust fan → %d m³/h", m3h);
             wrg2_data_t cur;
-            uint8_t supply = 50; /* default 25 m³/h if no current data */
-            if (wrg2_get_last_data(&cur) && cur.fan_target_supply)
-                supply = cur.fan_target_supply / 2;
-            err = wrg2_set_mode_unbalanced(supply, (uint8_t)m3h);
+            uint8_t exh = (wrg2_get_last_data(&cur) && cur.fan_target_exhaust)
+                          ? cur.fan_target_exhaust / 2 : 50;
+            ESP_LOGI(TAG, "control: unbal supply → %d m³/h, exhaust stays %d m³/h", m3h, exh);
+            err = wrg2_set_mode_unbalanced((uint8_t)m3h, exh);
+        } else if (cmd.type == CMD_FAN_UNBAL_EXHAUST) {
+            int m3h = atoi(cmd.payload);
+            if (m3h < 0) m3h = 0;
+            if (m3h > 100) m3h = 100;
+            wrg2_data_t cur;
+            uint8_t sup = (wrg2_get_last_data(&cur) && cur.fan_target_supply)
+                          ? cur.fan_target_supply / 2 : 50;
+            ESP_LOGI(TAG, "control: unbal exhaust → %d m³/h, supply stays %d m³/h", m3h, sup);
+            err = wrg2_set_mode_unbalanced(sup, (uint8_t)m3h);
         }
 
         if (err == ESP_OK) {

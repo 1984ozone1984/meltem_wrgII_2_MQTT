@@ -6,21 +6,38 @@ static const char *TAG = "ha_discovery";
 
 extern int mqtt_publish(const char *topic, const char *payload, int qos, int retain);
 
-/* Common device block — inlined into every discovery payload */
+/* Common device block */
 #define DEV \
     "\"availability_topic\":\"wrg2/availability\"," \
     "\"device\":{\"identifiers\":[\"wrg2mqtt\"],\"name\":\"Meltem M-WRG-II\"," \
     "\"manufacturer\":\"Meltem\",\"model\":\"M-WRG-II\"}"
 
-/* Helper: build and publish one discovery payload */
-static void pub(const char *disc_topic, const char *payload)
+static void pub(const char *topic, const char *payload)
 {
-    mqtt_publish(disc_topic, payload, 1, 1);
+    mqtt_publish(topic, payload, 1, 1);
+}
+
+/* Publish empty retained payload → HA removes the entity */
+static void del(const char *topic)
+{
+    mqtt_publish(topic, "", 1, 1);
 }
 
 void ha_discovery_publish(void)
 {
     char buf[600];
+
+    /* ── Delete stale entities from previous firmware versions ──────────── */
+    /* Phase 1 entities (wrong unique_id paths or replaced) */
+    del("homeassistant/sensor/wrg2_supply_temp/config");
+    del("homeassistant/sensor/wrg2_extract_temp/config");
+    del("homeassistant/sensor/wrg2_fan_speed/config");
+    del("homeassistant/binary_sensor/wrg2_bypass/config");
+    del("homeassistant/fan/wrg2_fan/config");
+    /* Phase 3 control entities replaced by buttons + separate numbers */
+    del("homeassistant/select/wrg2_mode/config");
+    del("homeassistant/number/wrg2_fan_level/config");
+    del("homeassistant/number/wrg2_fan_exhaust_level/config");
 
     /* ── Temperature sensors ─────────────────────────────────────────────── */
 
@@ -74,7 +91,7 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_hum_supply\"," DEV "}");
     pub("homeassistant/sensor/wrg2_hum_supply/config", buf);
 
-    /* ── Fan speed sensors (actual m³/h) ─────────────────────────────────── */
+    /* ── Actual fan speed sensors ────────────────────────────────────────── */
 
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Supply Fan Speed\","
@@ -118,36 +135,64 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_frost\"," DEV "}");
     pub("homeassistant/binary_sensor/wrg2_frost/config", buf);
 
-    /* ── Operating mode select ───────────────────────────────────────────── */
-    /* Options match mode_to_str() in app_main.c and control_task mapping.   */
+    /* ── Mode status sensor ──────────────────────────────────────────────── */
 
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Operating Mode\","
         "\"state_topic\":\"wrg2/status/operating_mode\","
+        "\"unique_id\":\"wrg2_operating_mode\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_operating_mode/config", buf);
+
+    /* ── Control: Off button (41120=1, 41132=0) ──────────────────────────── */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Switch Off\","
         "\"command_topic\":\"wrg2/control/mode/set\","
-        "\"options\":[\"off\",\"humidity\",\"manual\",\"manual_unbal\"],"
-        "\"unique_id\":\"wrg2_mode\"," DEV "}");
-    pub("homeassistant/select/wrg2_mode/config", buf);
+        "\"payload_press\":\"off\","
+        "\"unique_id\":\"wrg2_btn_off\"," DEV "}");
+    pub("homeassistant/button/wrg2_btn_off/config", buf);
 
-    /* ── Fan level numbers ───────────────────────────────────────────────── */
-
-    snprintf(buf, sizeof(buf),
-        "{\"name\":\"Fan Level Supply\","
-        "\"state_topic\":\"wrg2/status/fan_level\","
-        "\"command_topic\":\"wrg2/control/fan_level/set\","
-        "\"min\":0,\"max\":100,\"step\":5,"
-        "\"unit_of_measurement\":\"m\\u00b3/h\","
-        "\"unique_id\":\"wrg2_fan_level\"," DEV "}");
-    pub("homeassistant/number/wrg2_fan_level/config", buf);
+    /* ── Control: Humidity button (41120=2, 41121=112, 41132=0) ─────────── */
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Fan Level Exhaust\","
-        "\"state_topic\":\"wrg2/status/fan_exhaust_level\","
-        "\"command_topic\":\"wrg2/control/fan_exhaust/set\","
+        "{\"name\":\"Humidity Control\","
+        "\"command_topic\":\"wrg2/control/mode/set\","
+        "\"payload_press\":\"humidity\","
+        "\"unique_id\":\"wrg2_btn_humidity\"," DEV "}");
+    pub("homeassistant/button/wrg2_btn_humidity/config", buf);
+
+    /* ── Control: Balanced fan number (41120=3, 41121=val*2, 41132=0) ────── */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Manual Balanced Fan\","
+        "\"state_topic\":\"wrg2/status/fan_supply_target\","
+        "\"command_topic\":\"wrg2/control/fan_balanced/set\","
         "\"min\":0,\"max\":100,\"step\":5,"
         "\"unit_of_measurement\":\"m\\u00b3/h\","
-        "\"unique_id\":\"wrg2_fan_exhaust_level\"," DEV "}");
-    pub("homeassistant/number/wrg2_fan_exhaust_level/config", buf);
+        "\"unique_id\":\"wrg2_fan_balanced\"," DEV "}");
+    pub("homeassistant/number/wrg2_fan_balanced/config", buf);
 
-    ESP_LOGI(TAG, "15 discovery entities published");
+    /* ── Control: Unbalanced supply (41120=4, 41121=val*2, 41132=0) ──────── */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Unbalanced Supply Fan\","
+        "\"state_topic\":\"wrg2/status/fan_supply_target\","
+        "\"command_topic\":\"wrg2/control/fan_unbal_supply/set\","
+        "\"min\":0,\"max\":100,\"step\":5,"
+        "\"unit_of_measurement\":\"m\\u00b3/h\","
+        "\"unique_id\":\"wrg2_fan_unbal_supply\"," DEV "}");
+    pub("homeassistant/number/wrg2_fan_unbal_supply/config", buf);
+
+    /* ── Control: Unbalanced exhaust (41120=4, 41122=val*2, 41132=0) ─────── */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Unbalanced Exhaust Fan\","
+        "\"state_topic\":\"wrg2/status/fan_exhaust_target\","
+        "\"command_topic\":\"wrg2/control/fan_unbal_exhaust/set\","
+        "\"min\":0,\"max\":100,\"step\":5,"
+        "\"unit_of_measurement\":\"m\\u00b3/h\","
+        "\"unique_id\":\"wrg2_fan_unbal_exhaust\"," DEV "}");
+    pub("homeassistant/number/wrg2_fan_unbal_exhaust/config", buf);
+
+    ESP_LOGI(TAG, "discovery: 8 deleted, 16 published");
 }

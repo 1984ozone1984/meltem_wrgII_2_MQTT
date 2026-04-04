@@ -12,16 +12,18 @@ static const char *TAG = "mqtt_manager";
 static esp_mqtt_client_handle_t s_client    = NULL;
 static volatile bool            s_connected = false;
 
-/* Control topics */
-#define TOPIC_FAN_SET         "wrg2/control/fan_level/set"
-#define TOPIC_FAN_EXHAUST_SET "wrg2/control/fan_exhaust/set"
-#define TOPIC_MODE_SET        "wrg2/control/mode/set"
-#define TOPIC_OTA             "wrg2/ota/trigger"
+/* Control topics — one per action, matching the web control page */
+#define TOPIC_MODE_SET            "wrg2/control/mode/set"          /* "off"|"humidity" */
+#define TOPIC_FAN_BALANCED_SET    "wrg2/control/fan_balanced/set"  /* 0-100 m³/h → mode=3 */
+#define TOPIC_FAN_UNBAL_SUPPLY    "wrg2/control/fan_unbal_supply/set"  /* 0-100 → mode=4 */
+#define TOPIC_FAN_UNBAL_EXHAUST   "wrg2/control/fan_unbal_exhaust/set" /* 0-100 → mode=4 */
+#define TOPIC_OTA                 "wrg2/ota/trigger"
 
 /* Implemented in app_main.c — post commands to the control queue */
 extern void wrg2_enqueue_mode(const char *payload);
-extern void wrg2_enqueue_fan(const char *payload);
-extern void wrg2_enqueue_fan_exhaust(const char *payload);
+extern void wrg2_enqueue_fan_balanced(const char *payload);
+extern void wrg2_enqueue_fan_unbal_supply(const char *payload);
+extern void wrg2_enqueue_fan_unbal_exhaust(const char *payload);
 
 /* Availability topic */
 #define TOPIC_AVAIL      "wrg2/availability"
@@ -41,10 +43,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         esp_mqtt_client_publish(s_client, TOPIC_AVAIL, "online", 6, 1, 1);
 
         /* Subscribe to control topics */
-        esp_mqtt_client_subscribe(s_client, TOPIC_FAN_SET,         1);
-        esp_mqtt_client_subscribe(s_client, TOPIC_FAN_EXHAUST_SET, 1);
-        esp_mqtt_client_subscribe(s_client, TOPIC_MODE_SET,        1);
-        esp_mqtt_client_subscribe(s_client, TOPIC_OTA,             1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_MODE_SET,          1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_FAN_BALANCED_SET,  1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_FAN_UNBAL_SUPPLY,  1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_FAN_UNBAL_EXHAUST, 1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_OTA,               1);
 
         /* Re-publish HA discovery on every (re)connect */
         ha_discovery_publish();
@@ -71,17 +74,20 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         ESP_LOGD(TAG, "DATA topic=%s payload=%s", topic, payload);
 
         if (strcmp(topic, TOPIC_OTA) == 0) {
-            ESP_LOGI(TAG, "OTA trigger received, URL: %s", payload);
+            ESP_LOGI(TAG, "OTA trigger: %s", payload);
             ota_manager_handle_trigger(payload);
         } else if (strcmp(topic, TOPIC_MODE_SET) == 0) {
-            ESP_LOGI(TAG, "mode set: %s", payload);
+            ESP_LOGI(TAG, "mode: %s", payload);
             wrg2_enqueue_mode(payload);
-        } else if (strcmp(topic, TOPIC_FAN_SET) == 0) {
-            ESP_LOGI(TAG, "fan supply set: %s m³/h", payload);
-            wrg2_enqueue_fan(payload);
-        } else if (strcmp(topic, TOPIC_FAN_EXHAUST_SET) == 0) {
-            ESP_LOGI(TAG, "fan exhaust set: %s m³/h", payload);
-            wrg2_enqueue_fan_exhaust(payload);
+        } else if (strcmp(topic, TOPIC_FAN_BALANCED_SET) == 0) {
+            ESP_LOGI(TAG, "fan balanced: %s m³/h", payload);
+            wrg2_enqueue_fan_balanced(payload);
+        } else if (strcmp(topic, TOPIC_FAN_UNBAL_SUPPLY) == 0) {
+            ESP_LOGI(TAG, "fan unbal supply: %s m³/h", payload);
+            wrg2_enqueue_fan_unbal_supply(payload);
+        } else if (strcmp(topic, TOPIC_FAN_UNBAL_EXHAUST) == 0) {
+            ESP_LOGI(TAG, "fan unbal exhaust: %s m³/h", payload);
+            wrg2_enqueue_fan_unbal_exhaust(payload);
         }
         break;
     }

@@ -395,8 +395,9 @@ static esp_err_t control_get(httpd_req_t *req)
 
 /* Called by mqtt_manager and config_server via extern declarations */
 extern void wrg2_enqueue_mode(const char *payload);
-extern void wrg2_enqueue_fan(const char *payload);
-extern void wrg2_enqueue_fan_exhaust(const char *payload);
+extern void wrg2_enqueue_fan_balanced(const char *payload);
+extern void wrg2_enqueue_fan_unbal_supply(const char *payload);
+extern void wrg2_enqueue_fan_unbal_exhaust(const char *payload);
 
 static esp_err_t send_ok(httpd_req_t *req, const char *msg, const char *back)
 {
@@ -427,7 +428,7 @@ static esp_err_t ctrl_fan_post(httpd_req_t *req)
     char body[32]; read_body(req, body, sizeof(body));
     char val[16] = {0};
     get_field(body, "fan", val, sizeof(val));
-    if (val[0]) wrg2_enqueue_fan(val);
+    if (val[0]) wrg2_enqueue_fan_balanced(val);
     return send_ok(req, "Fan level command queued", "/control");
 }
 
