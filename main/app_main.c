@@ -25,12 +25,14 @@ typedef enum {
     CMD_MODE,             /* "off" | "humidity"                  */
     CMD_FAN_BALANCED,     /* 0-100 m³/h → mode=3, 41121=val*2   */
     CMD_FAN_UNBAL_SUPPLY, /* 0-100 m³/h → mode=4, 41121=val*2   */
-    CMD_FAN_UNBAL_EXHAUST /* 0-100 m³/h → mode=4, 41122=val*2   */
+    CMD_FAN_UNBAL_EXHAUST,/* 0-100 m³/h → mode=4, 41122=val*2   */
+    CMD_WRITE_REG         /* generic single-register write (cfg) */
 } cmd_type_t;
 
 typedef struct {
     cmd_type_t type;
     char       payload[32];
+    uint16_t   reg_addr;  /* used by CMD_WRITE_REG */
 } wrg2_cmd_t;
 
 static QueueHandle_t s_cmd_queue;
@@ -60,6 +62,13 @@ void wrg2_enqueue_fan_unbal_supply(const char *payload)
 void wrg2_enqueue_fan_unbal_exhaust(const char *payload)
 {
     wrg2_cmd_t cmd = { .type = CMD_FAN_UNBAL_EXHAUST };
+    strncpy(cmd.payload, payload, sizeof(cmd.payload) - 1);
+    xQueueSend(s_cmd_queue, &cmd, 0);
+}
+
+void wrg2_enqueue_write_reg(uint16_t addr, const char *payload)
+{
+    wrg2_cmd_t cmd = { .type = CMD_WRITE_REG, .reg_addr = addr };
     strncpy(cmd.payload, payload, sizeof(cmd.payload) - 1);
     xQueueSend(s_cmd_queue, &cmd, 0);
 }
@@ -101,6 +110,9 @@ static void publish_status(const wrg2_data_t *d)
     PUB("wrg2/status/frost_active",        "%s",   d->frost_active ? "ON" : "OFF");
     PUB("wrg2/status/error",               "%s",   d->error_flag   ? "ON" : "OFF");
     PUB("wrg2/status/filter_due",          "%s",   d->filter_due   ? "ON" : "OFF");
+    PUB("wrg2/status/filter_days_left",    "%u",   d->filter_days_left);
+    PUB("wrg2/status/hours_device",        "%lu",  (unsigned long)d->hours_device);
+    PUB("wrg2/status/hours_motors",        "%lu",  (unsigned long)d->hours_motors);
 
     /* CO2: skip publishing if sensor not installed (0x7FFF = no sensor) */
     if (d->co2_extract != 0x7FFF) {
@@ -109,6 +121,14 @@ static void publish_status(const wrg2_data_t *d)
 
     mqtt_publish("wrg2/status/operating_mode",
                  mode_to_str(d->mode, d->fan_target_supply), 1, 1);
+
+    /* Config registers — published so HA number entities show current values */
+    PUB("wrg2/config/hum_setpoint",  "%u", d->cfg_hum_setpoint);
+    PUB("wrg2/config/hum_fan_min",   "%u", d->cfg_hum_fan_min);
+    PUB("wrg2/config/hum_fan_max",   "%u", d->cfg_hum_fan_max);
+    PUB("wrg2/config/ext_fan_level", "%u", d->cfg_ext_fan_level);
+    PUB("wrg2/config/ext_on_delay",  "%u", d->cfg_ext_on_delay);
+    PUB("wrg2/config/ext_off_delay", "%u", d->cfg_ext_off_delay);
 
 #undef PUB
 }
@@ -205,6 +225,12 @@ static void control_task(void *arg)
                           ? cur.fan_target_supply / 2 : 50;
             ESP_LOGI(TAG, "control: unbal exhaust → %d m³/h, supply stays %d m³/h", m3h, sup);
             err = wrg2_set_mode_unbalanced(sup, (uint8_t)m3h);
+        } else if (cmd.type == CMD_WRITE_REG) {
+            int val = atoi(cmd.payload);
+            if (val < 0) val = 0;
+            if (val > 65535) val = 65535;
+            ESP_LOGI(TAG, "control: write reg %u = %d", cmd.reg_addr, val);
+            err = wrg2_write_config(cmd.reg_addr, (uint16_t)val);
         }
 
         if (err == ESP_OK) {

@@ -19,11 +19,20 @@ static volatile bool            s_connected = false;
 #define TOPIC_FAN_UNBAL_EXHAUST   "wrg2/control/fan_unbal_exhaust/set" /* 0-100 → mode=4 */
 #define TOPIC_OTA                 "wrg2/ota/trigger"
 
+/* Config write topics */
+#define TOPIC_CFG_HUM_SETPOINT    "wrg2/config/hum_setpoint/set"   /* 42000 */
+#define TOPIC_CFG_HUM_FAN_MIN     "wrg2/config/hum_fan_min/set"    /* 42001 */
+#define TOPIC_CFG_HUM_FAN_MAX     "wrg2/config/hum_fan_max/set"    /* 42002 */
+#define TOPIC_CFG_EXT_FAN_LEVEL   "wrg2/config/ext_fan_level/set"  /* 42007 */
+#define TOPIC_CFG_EXT_ON_DELAY    "wrg2/config/ext_on_delay/set"   /* 42008 */
+#define TOPIC_CFG_EXT_OFF_DELAY   "wrg2/config/ext_off_delay/set"  /* 42009 */
+
 /* Implemented in app_main.c — post commands to the control queue */
 extern void wrg2_enqueue_mode(const char *payload);
 extern void wrg2_enqueue_fan_balanced(const char *payload);
 extern void wrg2_enqueue_fan_unbal_supply(const char *payload);
 extern void wrg2_enqueue_fan_unbal_exhaust(const char *payload);
+extern void wrg2_enqueue_write_reg(uint16_t addr, const char *payload);
 
 /* Availability topic */
 #define TOPIC_AVAIL      "wrg2/availability"
@@ -48,6 +57,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         esp_mqtt_client_subscribe(s_client, TOPIC_FAN_UNBAL_SUPPLY,  1);
         esp_mqtt_client_subscribe(s_client, TOPIC_FAN_UNBAL_EXHAUST, 1);
         esp_mqtt_client_subscribe(s_client, TOPIC_OTA,               1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CFG_HUM_SETPOINT,  1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CFG_HUM_FAN_MIN,   1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CFG_HUM_FAN_MAX,   1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CFG_EXT_FAN_LEVEL, 1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CFG_EXT_ON_DELAY,  1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_CFG_EXT_OFF_DELAY, 1);
 
         /* Re-publish HA discovery on every (re)connect */
         ha_discovery_publish();
@@ -88,6 +103,24 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         } else if (strcmp(topic, TOPIC_FAN_UNBAL_EXHAUST) == 0) {
             ESP_LOGI(TAG, "fan unbal exhaust: %s m³/h", payload);
             wrg2_enqueue_fan_unbal_exhaust(payload);
+        } else if (strcmp(topic, TOPIC_CFG_HUM_SETPOINT) == 0) {
+            ESP_LOGI(TAG, "cfg hum setpoint: %s%%", payload);
+            wrg2_enqueue_write_reg(42000, payload);
+        } else if (strcmp(topic, TOPIC_CFG_HUM_FAN_MIN) == 0) {
+            ESP_LOGI(TAG, "cfg hum fan min: %s%%", payload);
+            wrg2_enqueue_write_reg(42001, payload);
+        } else if (strcmp(topic, TOPIC_CFG_HUM_FAN_MAX) == 0) {
+            ESP_LOGI(TAG, "cfg hum fan max: %s%%", payload);
+            wrg2_enqueue_write_reg(42002, payload);
+        } else if (strcmp(topic, TOPIC_CFG_EXT_FAN_LEVEL) == 0) {
+            ESP_LOGI(TAG, "cfg ext fan level: %s%%", payload);
+            wrg2_enqueue_write_reg(42007, payload);
+        } else if (strcmp(topic, TOPIC_CFG_EXT_ON_DELAY) == 0) {
+            ESP_LOGI(TAG, "cfg ext on delay: %s min", payload);
+            wrg2_enqueue_write_reg(42008, payload);
+        } else if (strcmp(topic, TOPIC_CFG_EXT_OFF_DELAY) == 0) {
+            ESP_LOGI(TAG, "cfg ext off delay: %s min", payload);
+            wrg2_enqueue_write_reg(42009, payload);
         }
         break;
     }

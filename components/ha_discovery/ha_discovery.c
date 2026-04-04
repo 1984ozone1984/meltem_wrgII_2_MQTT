@@ -25,7 +25,7 @@ static void del(const char *topic)
 
 void ha_discovery_publish(void)
 {
-    char buf[600];
+    char buf[700];
 
     /* ── Delete stale entities from previous firmware versions ──────────── */
     /* Phase 1 entities (wrong unique_id paths or replaced) */
@@ -194,5 +194,89 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_fan_unbal_exhaust\"," DEV "}");
     pub("homeassistant/number/wrg2_fan_unbal_exhaust/config", buf);
 
-    ESP_LOGI(TAG, "discovery: 8 deleted, 16 published");
+    /* ── Maintenance sensors ────────────────────────────────────────────────── */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Filter Days Remaining\","
+        "\"state_topic\":\"wrg2/status/filter_days_left\","
+        "\"unit_of_measurement\":\"d\","
+        "\"state_class\":\"measurement\","
+        "\"unique_id\":\"wrg2_filter_days\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_filter_days/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Device Operating Hours\","
+        "\"state_topic\":\"wrg2/status/hours_device\","
+        "\"unit_of_measurement\":\"h\","
+        "\"state_class\":\"total_increasing\","
+        "\"unique_id\":\"wrg2_hours_device\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_hours_device/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Motor Operating Hours\","
+        "\"state_topic\":\"wrg2/status/hours_motors\","
+        "\"unit_of_measurement\":\"h\","
+        "\"state_class\":\"total_increasing\","
+        "\"unique_id\":\"wrg2_hours_motors\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_hours_motors/config", buf);
+
+    /* ── Humidity control config (42000-42002) ──────────────────────────────── */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Humidity Start Setpoint\","
+        "\"state_topic\":\"wrg2/config/hum_setpoint\","
+        "\"command_topic\":\"wrg2/config/hum_setpoint/set\","
+        "\"min\":40,\"max\":80,\"step\":1,"
+        "\"unit_of_measurement\":\"%%\","
+        "\"unique_id\":\"wrg2_cfg_hum_sp\"," DEV "}");
+    pub("homeassistant/number/wrg2_cfg_hum_sp/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Humidity Min Fan Level\","
+        "\"state_topic\":\"wrg2/config/hum_fan_min\","
+        "\"command_topic\":\"wrg2/config/hum_fan_min/set\","
+        "\"min\":0,\"max\":100,\"step\":1,"
+        "\"unit_of_measurement\":\"%%\","
+        "\"unique_id\":\"wrg2_cfg_hum_fan_min\"," DEV "}");
+    pub("homeassistant/number/wrg2_cfg_hum_fan_min/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Humidity Max Fan Level\","
+        "\"state_topic\":\"wrg2/config/hum_fan_max\","
+        "\"command_topic\":\"wrg2/config/hum_fan_max/set\","
+        "\"min\":0,\"max\":100,\"step\":1,"
+        "\"unit_of_measurement\":\"%%\","
+        "\"unique_id\":\"wrg2_cfg_hum_fan_max\"," DEV "}");
+    pub("homeassistant/number/wrg2_cfg_hum_fan_max/config", buf);
+
+    /* ── External input config (42007-42009) ───────────────────────────────── */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Ext Input Fan Level\","
+        "\"state_topic\":\"wrg2/config/ext_fan_level\","
+        "\"command_topic\":\"wrg2/config/ext_fan_level/set\","
+        "\"min\":0,\"max\":100,\"step\":1,"
+        "\"unit_of_measurement\":\"%%\","
+        "\"unique_id\":\"wrg2_cfg_ext_fan\"," DEV "}");
+    pub("homeassistant/number/wrg2_cfg_ext_fan/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Ext Input On Delay\","
+        "\"state_topic\":\"wrg2/config/ext_on_delay\","
+        "\"command_topic\":\"wrg2/config/ext_on_delay/set\","
+        "\"min\":0,\"max\":60,\"step\":1,"
+        "\"unit_of_measurement\":\"min\","
+        "\"unique_id\":\"wrg2_cfg_ext_on\"," DEV "}");
+    pub("homeassistant/number/wrg2_cfg_ext_on/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Ext Input Off Delay\","
+        "\"state_topic\":\"wrg2/config/ext_off_delay\","
+        "\"command_topic\":\"wrg2/config/ext_off_delay/set\","
+        "\"min\":0,\"max\":120,\"step\":1,"
+        "\"unit_of_measurement\":\"min\","
+        "\"unique_id\":\"wrg2_cfg_ext_off\"," DEV "}");
+    pub("homeassistant/number/wrg2_cfg_ext_off/config", buf);
+
+    ESP_LOGI(TAG, "discovery: 8 deleted, 25 published");
 }
