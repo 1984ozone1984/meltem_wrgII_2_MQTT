@@ -97,12 +97,12 @@ static void publish_status(const wrg2_data_t *d)
     do { snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
          mqtt_publish(topic, buf, 1, 1); } while (0)
 
-    PUB("wrg2/status/temperature_supply",  "%.1f", d->temp_supply);
-    PUB("wrg2/status/temperature_extract", "%.1f", d->temp_extract);
-    PUB("wrg2/status/temperature_exhaust", "%.1f", d->temp_exhaust);
-    PUB("wrg2/status/temperature_outdoor", "%.1f", d->temp_outdoor);
-    PUB("wrg2/status/humidity_extract",    "%u",   d->humidity_extract);
-    PUB("wrg2/status/humidity_supply",     "%u",   d->humidity_supply);
+    PUB("wrg2/status/temperature_zuluft",    "%.1f", d->temp_zuluft);
+    PUB("wrg2/status/temperature_abluft",   "%.1f", d->temp_abluft);
+    PUB("wrg2/status/temperature_fortluft", "%.1f", d->temp_fortluft);
+    PUB("wrg2/status/temperature_aussenluft","%.1f",d->temp_aussenluft);
+    PUB("wrg2/status/feuchte_abluft",       "%u",   d->feuchte_abluft);
+    PUB("wrg2/status/feuchte_zuluft",       "%u",   d->feuchte_zuluft);
     PUB("wrg2/status/fan_supply_m3h",      "%u",   d->fan_supply_m3h);
     PUB("wrg2/status/fan_exhaust_m3h",     "%u",   d->fan_exhaust_m3h);
     PUB("wrg2/status/fan_supply_target",   "%u",   d->fan_target_supply  / 2);
@@ -145,19 +145,19 @@ static void polling_task(void *arg)
         esp_task_wdt_reset();
 
         if (wrg2_read_all(&data) == ESP_OK) {
-            ESP_LOGI(TAG, "[TEMP]   supply=%.1fC  extract=%.1fC  exhaust=%.1fC  outdoor=%.1fC",
-                     data.temp_supply, data.temp_extract,
-                     data.temp_exhaust, data.temp_outdoor);
+            ESP_LOGI(TAG, "[TEMP]   zuluft=%.1fC  abluft=%.1fC  fortluft=%.1fC  aussenluft=%.1fC",
+                     data.temp_zuluft, data.temp_abluft,
+                     data.temp_fortluft, data.temp_aussenluft);
             ESP_LOGI(TAG, "[FAN]    supply=%um3h  exhaust=%um3h  target=%u/%u(0-200)  mode=%s(%u)",
                      data.fan_supply_m3h, data.fan_exhaust_m3h,
                      data.fan_target_supply, data.fan_target_exhaust,
                      mode_to_str(data.mode, data.fan_target_supply), data.mode);
             if (data.co2_extract == 0x7FFF) {
-                ESP_LOGI(TAG, "[AIR]    hum_extract=%u%%  hum_supply=%u%%  co2=N/A (no sensor)",
-                         data.humidity_extract, data.humidity_supply);
+                ESP_LOGI(TAG, "[AIR]    feuchte_abluft=%u%%  feuchte_zuluft=%u%%  co2=N/A (no sensor)",
+                         data.feuchte_abluft, data.feuchte_zuluft);
             } else {
-                ESP_LOGI(TAG, "[AIR]    hum_extract=%u%%  hum_supply=%u%%  co2=%uppm",
-                         data.humidity_extract, data.humidity_supply, data.co2_extract);
+                ESP_LOGI(TAG, "[AIR]    feuchte_abluft=%u%%  feuchte_zuluft=%u%%  co2=%uppm",
+                         data.feuchte_abluft, data.feuchte_zuluft, data.co2_extract);
             }
             ESP_LOGI(TAG, "[STATUS] error=%u  filter_due=%u  frost=%u  filter_days=%u  dev_h=%lu  mot_h=%lu",
                      data.error_flag, data.filter_due, data.frost_active,

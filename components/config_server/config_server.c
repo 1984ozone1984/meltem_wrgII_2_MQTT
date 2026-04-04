@@ -153,12 +153,12 @@ static esp_err_t root_get(httpd_req_t *req)
         n += snprintf(buf + n, 6144 - n,
             "<div class=grid>"
             "<div class=box><h2>Temperatures</h2><table>"
-            "<tr><th>Supply (Zuluft)</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
-            "<tr><th>Extract (Abluft)</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
-            "<tr><th>Exhaust (Fortluft)</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
-            "<tr><th>Outdoor (Außenluft)</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
+            "<tr><th>Zulufttemperatur</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
+            "<tr><th>Ablufttemperatur</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
+            "<tr><th>Fortlufttemperatur</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
+            "<tr><th>Au&#223;enlufttemperatur</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
             "</table></div>",
-            d.temp_supply, d.temp_extract, d.temp_exhaust, d.temp_outdoor);
+            d.temp_zuluft, d.temp_abluft, d.temp_fortluft, d.temp_aussenluft);
 
         /* ── Air quality ── */
         char co2_cell[64];
@@ -170,11 +170,11 @@ static esp_err_t root_get(httpd_req_t *req)
         }
         n += snprintf(buf + n, 6144 - n,
             "<div class=box><h2>Air Quality</h2><table>"
-            "<tr><th>Humidity extract</th><td><span class=big>%u</span><span class=unit>%%</span></td></tr>"
-            "<tr><th>Humidity supply</th><td><span class=big>%u</span><span class=unit>%%</span></td></tr>"
+            "<tr><th>Feuchte Abluft</th><td><span class=big>%u</span><span class=unit>%%</span></td></tr>"
+            "<tr><th>Feuchte Zuluft</th><td><span class=big>%u</span><span class=unit>%%</span></td></tr>"
             "<tr><th>CO2 extract</th><td>%s</td></tr>"
             "</table></div>",
-            d.humidity_extract, d.humidity_supply, co2_cell);
+            d.feuchte_abluft, d.feuchte_zuluft, co2_cell);
 
         /* ── Fans & Mode ── */
         n += snprintf(buf + n, 6144 - n,

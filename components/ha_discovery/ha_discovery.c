@@ -46,62 +46,69 @@ void ha_discovery_publish(void)
     del("homeassistant/select/wrg2_mode/config");
     del("homeassistant/number/wrg2_fan_level/config");
     del("homeassistant/number/wrg2_fan_exhaust_level/config");
+    /* Phase 4 temp/humidity entities renamed to German register names */
+    del("homeassistant/sensor/wrg2_temp_supply/config");
+    del("homeassistant/sensor/wrg2_temp_extract/config");
+    del("homeassistant/sensor/wrg2_temp_exhaust/config");
+    del("homeassistant/sensor/wrg2_temp_outdoor/config");
+    del("homeassistant/sensor/wrg2_hum_extract/config");
+    del("homeassistant/sensor/wrg2_hum_supply/config");
 
     /* ════════════════════════════════════════════════════════════════════════
      * TEMPERATURES  (main card)
      * ════════════════════════════════════════════════════════════════════════ */
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Supply Air Temperature\","
-        "\"state_topic\":\"wrg2/status/temperature_supply\","
+        "{\"name\":\"Zulufttemperatur\","
+        "\"state_topic\":\"wrg2/status/temperature_zuluft\","
         "\"unit_of_measurement\":\"\xc2\xb0\x43\",\"device_class\":\"temperature\","
         "\"state_class\":\"measurement\","
-        "\"unique_id\":\"wrg2_temp_supply\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_temp_supply/config", buf);
+        "\"unique_id\":\"wrg2_temp_zuluft\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_temp_zuluft/config", buf);
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Extract Air Temperature\","
-        "\"state_topic\":\"wrg2/status/temperature_extract\","
+        "{\"name\":\"Ablufttemperatur\","
+        "\"state_topic\":\"wrg2/status/temperature_abluft\","
         "\"unit_of_measurement\":\"\xc2\xb0\x43\",\"device_class\":\"temperature\","
         "\"state_class\":\"measurement\","
-        "\"unique_id\":\"wrg2_temp_extract\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_temp_extract/config", buf);
+        "\"unique_id\":\"wrg2_temp_abluft\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_temp_abluft/config", buf);
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Exhaust Air Temperature\","
-        "\"state_topic\":\"wrg2/status/temperature_exhaust\","
+        "{\"name\":\"Fortlufttemperatur\","
+        "\"state_topic\":\"wrg2/status/temperature_fortluft\","
         "\"unit_of_measurement\":\"\xc2\xb0\x43\",\"device_class\":\"temperature\","
         "\"state_class\":\"measurement\","
-        "\"unique_id\":\"wrg2_temp_exhaust\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_temp_exhaust/config", buf);
+        "\"unique_id\":\"wrg2_temp_fortluft\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_temp_fortluft/config", buf);
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Outdoor Air Temperature\","
-        "\"state_topic\":\"wrg2/status/temperature_outdoor\","
+        "{\"name\":\"Au\xc3\x9f" "enlufttemperatur\","
+        "\"state_topic\":\"wrg2/status/temperature_aussenluft\","
         "\"unit_of_measurement\":\"\xc2\xb0\x43\",\"device_class\":\"temperature\","
         "\"state_class\":\"measurement\","
-        "\"unique_id\":\"wrg2_temp_outdoor\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_temp_outdoor/config", buf);
+        "\"unique_id\":\"wrg2_temp_aussenluft\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_temp_aussenluft/config", buf);
 
     /* ════════════════════════════════════════════════════════════════════════
      * AIR QUALITY  (main card)
      * ════════════════════════════════════════════════════════════════════════ */
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Extract Air Humidity\","
-        "\"state_topic\":\"wrg2/status/humidity_extract\","
+        "{\"name\":\"Feuchte Abluft\","
+        "\"state_topic\":\"wrg2/status/feuchte_abluft\","
         "\"unit_of_measurement\":\"%%\",\"device_class\":\"humidity\","
         "\"state_class\":\"measurement\","
-        "\"unique_id\":\"wrg2_hum_extract\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_hum_extract/config", buf);
+        "\"unique_id\":\"wrg2_feuchte_abluft\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_feuchte_abluft/config", buf);
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Supply Air Humidity\","
-        "\"state_topic\":\"wrg2/status/humidity_supply\","
+        "{\"name\":\"Feuchte Zuluft\","
+        "\"state_topic\":\"wrg2/status/feuchte_zuluft\","
         "\"unit_of_measurement\":\"%%\",\"device_class\":\"humidity\","
         "\"state_class\":\"measurement\","
-        "\"unique_id\":\"wrg2_hum_supply\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_hum_supply/config", buf);
+        "\"unique_id\":\"wrg2_feuchte_zuluft\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_feuchte_zuluft/config", buf);
 
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Supply Fan Speed\","
@@ -311,5 +318,5 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_cfg_ext_off\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_ext_off/config", buf);
 
-    ESP_LOGI(TAG, "discovery: 8 deleted, 26 published");
+    ESP_LOGI(TAG, "discovery: 14 deleted, 26 published");
 }

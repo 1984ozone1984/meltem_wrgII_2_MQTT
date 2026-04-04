@@ -148,12 +148,12 @@ esp_err_t wrg2_read_all(wrg2_data_t *data)
     if (err != ESP_OK) { ESP_LOGE(TAG, "burst G (mode) failed"); return err; }
 
     /* Parse mandatory fields */
-    data->temp_exhaust      = regs_to_float(&a[A_TEMP_EXHAUST]);
-    data->temp_outdoor      = regs_to_float(&a[A_TEMP_OUTDOOR]);
-    data->temp_extract      = regs_to_float(&a[A_TEMP_EXTRACT]);
-    data->temp_supply       = regs_to_float(&b[B_TEMP_SUPPLY]);
-    data->humidity_extract  = a[A_HUM_EXTRACT];
-    data->humidity_supply   = b[B_HUM_SUPPLY];
+    data->temp_fortluft     = regs_to_float(&a[A_TEMP_EXHAUST]);
+    data->temp_aussenluft   = regs_to_float(&a[A_TEMP_OUTDOOR]);
+    data->temp_abluft       = regs_to_float(&a[A_TEMP_EXTRACT]);
+    data->temp_zuluft       = regs_to_float(&b[B_TEMP_SUPPLY]);
+    data->feuchte_abluft    = a[A_HUM_EXTRACT];
+    data->feuchte_zuluft    = b[B_HUM_SUPPLY];
     data->co2_extract       = a[A_CO2_EXTRACT];
     data->error_flag        = (uint8_t)(c[C_ERROR_FLAG]   & 0xFF);
     data->filter_due        = (uint8_t)(c[C_FILTER_DUE]   & 0xFF);

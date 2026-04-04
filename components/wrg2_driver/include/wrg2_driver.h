@@ -13,14 +13,14 @@
  */
 typedef struct {
     /* ── Temperatures (°C) ── */
-    float    temp_supply;         /* 41009-41010  Zuluft    (supply / inlet)  */
-    float    temp_extract;        /* 41004-41005  Abluft    (extract / room)  */
-    float    temp_exhaust;        /* 41000-41001  Fortluft  (exhaust / out)   */
-    float    temp_outdoor;        /* 41002-41003  Außenluft (outdoor / fresh) */
+    float    temp_zuluft;         /* 41009-41010  Zulufttemperatur    */
+    float    temp_abluft;         /* 41004-41005  Ablufttemperatur    */
+    float    temp_fortluft;       /* 41000-41001  Fortlufttemperatur  */
+    float    temp_aussenluft;     /* 41002-41003  Außenlufttemperatur */
 
     /* ── Humidity (%) ── */
-    uint16_t humidity_extract;    /* 41006  Feuchte Abluft */
-    uint16_t humidity_supply;     /* 41011  Feuchte Zuluft */
+    uint16_t feuchte_abluft;      /* 41006  Feuchte Abluft */
+    uint16_t feuchte_zuluft;      /* 41011  Feuchte Zuluft */
 
     /* ── Air quality ── */
     uint16_t co2_extract;         /* 41007  CO2 Abluft, ppm */
