@@ -95,3 +95,17 @@ esp_err_t wrg2_set_mode(uint8_t mode, uint8_t fan_target);
  * m3h is clamped to [0, 100].
  */
 esp_err_t wrg2_set_fan_level(uint8_t m3h);
+
+/**
+ * Set unbalanced manual fan speeds (§16.7.2).
+ * Writes 41120=4, 41121=supply*2, 41122=exhaust*2, 41132=0.
+ * Both arguments are clamped to [0, 100] m³/h.
+ */
+esp_err_t wrg2_set_mode_unbalanced(uint8_t supply_m3h, uint8_t exhaust_m3h);
+
+/**
+ * Write a single configuration register (42xxx range).
+ * Thin wrapper around modbus_rtu_write_reg for use by the web control page.
+ * Returns ESP_OK on success.
+ */
+esp_err_t wrg2_write_config(uint16_t addr, uint16_t value);

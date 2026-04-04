@@ -125,15 +125,14 @@ void ha_discovery_publish(void)
         "{\"name\":\"Operating Mode\","
         "\"state_topic\":\"wrg2/status/operating_mode\","
         "\"command_topic\":\"wrg2/control/mode/set\","
-        "\"options\":[\"off\",\"humidity\",\"manual\"],"
+        "\"options\":[\"off\",\"humidity\",\"manual\",\"manual_unbal\"],"
         "\"unique_id\":\"wrg2_mode\"," DEV "}");
     pub("homeassistant/select/wrg2_mode/config", buf);
 
-    /* ── Fan level number (balanced manual speed) ────────────────────────── */
-    /* State = current fan_target_supply / 2 (m³/h). Command = 0-100 m³/h.  */
+    /* ── Fan level numbers ───────────────────────────────────────────────── */
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Fan Level\","
+        "{\"name\":\"Fan Level Supply\","
         "\"state_topic\":\"wrg2/status/fan_level\","
         "\"command_topic\":\"wrg2/control/fan_level/set\","
         "\"min\":0,\"max\":100,\"step\":5,"
@@ -141,5 +140,14 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_fan_level\"," DEV "}");
     pub("homeassistant/number/wrg2_fan_level/config", buf);
 
-    ESP_LOGI(TAG, "13 discovery entities published");
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Fan Level Exhaust\","
+        "\"state_topic\":\"wrg2/status/fan_exhaust_level\","
+        "\"command_topic\":\"wrg2/control/fan_exhaust/set\","
+        "\"min\":0,\"max\":100,\"step\":5,"
+        "\"unit_of_measurement\":\"m\\u00b3/h\","
+        "\"unique_id\":\"wrg2_fan_exhaust_level\"," DEV "}");
+    pub("homeassistant/number/wrg2_fan_exhaust_level/config", buf);
+
+    ESP_LOGI(TAG, "15 discovery entities published");
 }

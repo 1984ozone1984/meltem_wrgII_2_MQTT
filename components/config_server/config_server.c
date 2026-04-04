@@ -141,7 +141,8 @@ static esp_err_t root_get(httpd_req_t *req)
         "<meta http-equiv=refresh content=10>"
         "<title>WRG2MQTT</title><style>%s</style></head><body>"
         "<h1>M-WRG-II <span class=refresh>(auto-refresh 10s)</span></h1>"
-        "<nav><a href='/'>Status</a><a href='/config'>Settings</a></nav>",
+        "<nav><a href='/'>Status</a><a href='/control'>Control</a>"
+        "<a href='/config'>Settings</a></nav>",
         CSS);
 
     if (!have_data) {
@@ -257,6 +258,228 @@ static esp_err_t root_get(httpd_req_t *req)
     httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
     free(buf);
     return ESP_OK;
+}
+
+/* ── GET /control ─────────────────────────────────────────────────────────── */
+
+static esp_err_t control_get(httpd_req_t *req)
+{
+    wrg2_data_t d = {0};
+    bool have = wrg2_get_last_data(&d);
+
+    char *buf = malloc(6144);
+    if (!buf) { httpd_resp_send_500(req); return ESP_FAIL; }
+
+    int n = 0;
+    n += snprintf(buf + n, 6144 - n,
+        "<!DOCTYPE html><html><head>"
+        "<meta charset=UTF-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>WRG2MQTT Control</title><style>%s</style></head><body>"
+        "<h1>M-WRG-II Control</h1>"
+        "<nav><a href='/'>Status</a><a href='/control'>Control</a>"
+        "<a href='/config'>Settings</a></nav>",
+        CSS);
+
+    if (!have) {
+        n += snprintf(buf + n, 6144 - n,
+            "<div class=box><p>Waiting for first Modbus read...</p></div>");
+        n += snprintf(buf + n, 6144 - n, "</body></html>");
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+        free(buf);
+        return ESP_OK;
+    }
+
+    /* ── Operating mode ── */
+    const char *modes[] = {"off","humidity","manual","manual_unbal"};
+    const char *mode_labels[] = {"Off","Humidity controlled","Manual balanced","Manual unbalanced"};
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=box><h2>Operating Mode</h2>"
+        "<form method=POST action=/control/mode>"
+        "<label>Mode</label><select name=mode style='width:100%%;padding:8px;"
+        "border:1px solid #ccc;border-radius:4px;font-size:1em;'>");
+    const char *cur_mode = mode_str(d.mode, d.fan_target_supply);
+    for (int i = 0; i < 4; i++) {
+        n += snprintf(buf + n, 6144 - n,
+            "<option value='%s'%s>%s</option>",
+            modes[i],
+            strcmp(cur_mode, modes[i]) == 0 ? " selected" : "",
+            mode_labels[i]);
+    }
+    n += snprintf(buf + n, 6144 - n,
+        "</select>"
+        "<button type=submit>Set Mode</button>"
+        "</form></div>");
+
+    /* ── Balanced fan ── */
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=box><h2>Manual Balanced Fan Speed</h2>"
+        "<form method=POST action=/control/fan>"
+        "<label>Supply &amp; Exhaust (0&ndash;100 m&#179;/h)</label>"
+        "<input type=number name=fan min=0 max=100 step=5 value=%u>"
+        "<button type=submit>Set</button>"
+        "</form></div>",
+        d.fan_target_supply / 2);
+
+    /* ── Unbalanced fan ── */
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=box><h2>Manual Unbalanced Fan Speed</h2>"
+        "<form method=POST action=/control/fan_unbal>"
+        "<label>Supply (Zuluft) 0&ndash;100 m&#179;/h</label>"
+        "<input type=number name=supply min=0 max=100 step=5 value=%u>"
+        "<label>Exhaust (Fortluft) 0&ndash;100 m&#179;/h</label>"
+        "<input type=number name=exhaust min=0 max=100 step=5 value=%u>"
+        "<button type=submit>Set Unbalanced</button>"
+        "</form></div>",
+        d.fan_target_supply  / 2,
+        d.fan_target_exhaust / 2);
+
+    /* ── Config 42xxx ── */
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=grid>"
+
+        "<div class=box><h2>Humidity Control (42000-42002)</h2>"
+        "<form method=POST action=/control/cfg_hum>"
+        "<label>Setpoint 40&ndash;80%%</label>"
+        "<input type=number name=sp min=40 max=80 step=1 value=%u>"
+        "<label>Min fan level 0&ndash;100%%</label>"
+        "<input type=number name=fmin min=0 max=100 step=10 value=%u>"
+        "<label>Max fan level 10&ndash;100%%</label>"
+        "<input type=number name=fmax min=10 max=100 step=10 value=%u>"
+        "<button type=submit>Save</button>"
+        "</form></div>",
+        d.cfg_hum_setpoint, d.cfg_hum_fan_min, d.cfg_hum_fan_max);
+
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=box><h2>CO2 Control (42003-42005)</h2>"
+        "<form method=POST action=/control/cfg_co2>"
+        "<label>Setpoint 500&ndash;1200 ppm</label>"
+        "<input type=number name=sp min=500 max=1200 step=1 value=%u>"
+        "<label>Min fan level 0&ndash;100%%</label>"
+        "<input type=number name=fmin min=0 max=100 step=10 value=%u>"
+        "<label>Max fan level 10&ndash;100%%</label>"
+        "<input type=number name=fmax min=10 max=100 step=10 value=%u>"
+        "<button type=submit>Save</button>"
+        "</form></div>",
+        d.cfg_co2_setpoint, d.cfg_co2_fan_min, d.cfg_co2_fan_max);
+
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=box><h2>External Input (42007-42009)</h2>"
+        "<form method=POST action=/control/cfg_ext>"
+        "<label>Fan level 10&ndash;100%%</label>"
+        "<input type=number name=fan min=10 max=100 step=10 value=%u>"
+        "<label>On-delay 0&ndash;240 min</label>"
+        "<input type=number name=on min=0 max=240 step=1 value=%u>"
+        "<label>Off-delay 0&ndash;240 min</label>"
+        "<input type=number name=off min=0 max=240 step=1 value=%u>"
+        "<button type=submit>Save</button>"
+        "</form></div>"
+        "</div>",
+        d.cfg_ext_fan_level, d.cfg_ext_on_delay, d.cfg_ext_off_delay);
+
+    n += snprintf(buf + n, 6144 - n, "</body></html>");
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+    free(buf);
+    return ESP_OK;
+}
+
+/* ── POST helpers for control ─────────────────────────────────────────────── */
+
+/* Called by mqtt_manager and config_server via extern declarations */
+extern void wrg2_enqueue_mode(const char *payload);
+extern void wrg2_enqueue_fan(const char *payload);
+extern void wrg2_enqueue_fan_exhaust(const char *payload);
+
+static esp_err_t send_ok(httpd_req_t *req, const char *msg, const char *back)
+{
+    char buf[300];
+    snprintf(buf, sizeof(buf),
+        "<!DOCTYPE html><html><head><meta charset=UTF-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>OK</title></head>"
+        "<body style='font-family:sans-serif;padding:20px'>"
+        "<h2>&#10003; %s</h2><p><a href='%s'>Back</a></p></body></html>",
+        msg, back);
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t ctrl_mode_post(httpd_req_t *req)
+{
+    char body[64]; read_body(req, body, sizeof(body));
+    char mode[32] = {0};
+    get_field(body, "mode", mode, sizeof(mode));
+    if (mode[0]) wrg2_enqueue_mode(mode);
+    return send_ok(req, "Mode command queued", "/control");
+}
+
+static esp_err_t ctrl_fan_post(httpd_req_t *req)
+{
+    char body[32]; read_body(req, body, sizeof(body));
+    char val[16] = {0};
+    get_field(body, "fan", val, sizeof(val));
+    if (val[0]) wrg2_enqueue_fan(val);
+    return send_ok(req, "Fan level command queued", "/control");
+}
+
+static esp_err_t ctrl_fan_unbal_post(httpd_req_t *req)
+{
+    char body[64]; read_body(req, body, sizeof(body));
+    char sup[16] = {0}, exh[16] = {0};
+    get_field(body, "supply",  sup, sizeof(sup));
+    get_field(body, "exhaust", exh, sizeof(exh));
+    /* Encode as "supply,exhaust" — control_task handles via CMD_FAN + exhaust path */
+    if (sup[0] && exh[0]) {
+        int s = atoi(sup), e = atoi(exh);
+        /* Directly call the driver — config_server runs in its own task,
+           Modbus mutex serializes access safely */
+        wrg2_set_mode_unbalanced((uint8_t)(s < 0 ? 0 : s > 100 ? 100 : s),
+                                 (uint8_t)(e < 0 ? 0 : e > 100 ? 100 : e));
+    }
+    return send_ok(req, "Unbalanced fan command sent", "/control");
+}
+
+static esp_err_t ctrl_cfg_hum_post(httpd_req_t *req)
+{
+    char body[64]; read_body(req, body, sizeof(body));
+    char sp[16]={0}, fmin[16]={0}, fmax[16]={0};
+    get_field(body, "sp",   sp,   sizeof(sp));
+    get_field(body, "fmin", fmin, sizeof(fmin));
+    get_field(body, "fmax", fmax, sizeof(fmax));
+    if (sp[0])   wrg2_write_config(42000, (uint16_t)atoi(sp));
+    if (fmin[0]) wrg2_write_config(42001, (uint16_t)atoi(fmin));
+    if (fmax[0]) wrg2_write_config(42002, (uint16_t)atoi(fmax));
+    return send_ok(req, "Humidity config saved", "/control");
+}
+
+static esp_err_t ctrl_cfg_co2_post(httpd_req_t *req)
+{
+    char body[64]; read_body(req, body, sizeof(body));
+    char sp[16]={0}, fmin[16]={0}, fmax[16]={0};
+    get_field(body, "sp",   sp,   sizeof(sp));
+    get_field(body, "fmin", fmin, sizeof(fmin));
+    get_field(body, "fmax", fmax, sizeof(fmax));
+    if (sp[0])   wrg2_write_config(42003, (uint16_t)atoi(sp));
+    if (fmin[0]) wrg2_write_config(42004, (uint16_t)atoi(fmin));
+    if (fmax[0]) wrg2_write_config(42005, (uint16_t)atoi(fmax));
+    return send_ok(req, "CO2 config saved", "/control");
+}
+
+static esp_err_t ctrl_cfg_ext_post(httpd_req_t *req)
+{
+    char body[64]; read_body(req, body, sizeof(body));
+    char fan[16]={0}, on[16]={0}, off_[16]={0};
+    get_field(body, "fan", fan,  sizeof(fan));
+    get_field(body, "on",  on,   sizeof(on));
+    get_field(body, "off", off_, sizeof(off_));
+    if (fan[0])  wrg2_write_config(42007, (uint16_t)atoi(fan));
+    if (on[0])   wrg2_write_config(42008, (uint16_t)atoi(on));
+    if (off_[0]) wrg2_write_config(42009, (uint16_t)atoi(off_));
+    return send_ok(req, "External input config saved", "/control");
 }
 
 /* ── GET /config ──────────────────────────────────────────────────────────── */
@@ -424,7 +647,8 @@ static esp_err_t reboot_post(httpd_req_t *req)
 esp_err_t config_server_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.lru_purge_enable = true;
+    cfg.lru_purge_enable  = true;
+    cfg.max_uri_handlers  = 16;
 
     httpd_handle_t server = NULL;
     esp_err_t err = httpd_start(&server, &cfg);
@@ -434,12 +658,19 @@ esp_err_t config_server_start(void)
     }
 
     static const httpd_uri_t uris[] = {
-        { .uri = "/",                 .method = HTTP_GET,  .handler = root_get             },
-        { .uri = "/config",           .method = HTTP_GET,  .handler = config_get           },
-        { .uri = "/config/hostname",  .method = HTTP_POST, .handler = config_hostname_post },
-        { .uri = "/config/wifi",      .method = HTTP_POST, .handler = config_wifi_post     },
-        { .uri = "/config/mqtt",      .method = HTTP_POST, .handler = config_mqtt_post     },
-        { .uri = "/reboot",           .method = HTTP_POST, .handler = reboot_post          },
+        { .uri = "/",                  .method = HTTP_GET,  .handler = root_get             },
+        { .uri = "/control",           .method = HTTP_GET,  .handler = control_get          },
+        { .uri = "/control/mode",      .method = HTTP_POST, .handler = ctrl_mode_post       },
+        { .uri = "/control/fan",       .method = HTTP_POST, .handler = ctrl_fan_post        },
+        { .uri = "/control/fan_unbal", .method = HTTP_POST, .handler = ctrl_fan_unbal_post  },
+        { .uri = "/control/cfg_hum",   .method = HTTP_POST, .handler = ctrl_cfg_hum_post    },
+        { .uri = "/control/cfg_co2",   .method = HTTP_POST, .handler = ctrl_cfg_co2_post    },
+        { .uri = "/control/cfg_ext",   .method = HTTP_POST, .handler = ctrl_cfg_ext_post    },
+        { .uri = "/config",            .method = HTTP_GET,  .handler = config_get           },
+        { .uri = "/config/hostname",   .method = HTTP_POST, .handler = config_hostname_post },
+        { .uri = "/config/wifi",       .method = HTTP_POST, .handler = config_wifi_post     },
+        { .uri = "/config/mqtt",       .method = HTTP_POST, .handler = config_mqtt_post     },
+        { .uri = "/reboot",            .method = HTTP_POST, .handler = reboot_post          },
     };
     for (int i = 0; i < (int)(sizeof(uris) / sizeof(uris[0])); i++) {
         httpd_register_uri_handler(server, &uris[i]);

@@ -56,13 +56,14 @@ static const char *TAG = "wrg2_driver";
 #define BURST_E_COUNT  1
                             /* 41028-41029  undefined — gap */
 
-/* Burst F: operating hours — 41030..41033 */
+/* Burst F: operating hours — 41030..41033
+ * Same word order as floats: reg[0] = low word, reg[1] = high word */
 #define BURST_F_BASE   41030
 #define BURST_F_COUNT  4
-#define F_HOURS_DEV_H   0   /* 41030  UINT32 high word */
-#define F_HOURS_DEV_L   1   /* 41031  UINT32 low word  */
-#define F_HOURS_MOT_H   2   /* 41032  UINT32 high word */
-#define F_HOURS_MOT_L   3   /* 41033  UINT32 low word  */
+#define F_HOURS_DEV_L   0   /* 41030  UINT32 low word  */
+#define F_HOURS_DEV_H   1   /* 41031  UINT32 high word */
+#define F_HOURS_MOT_L   2   /* 41032  UINT32 low word  */
+#define F_HOURS_MOT_H   3   /* 41033  UINT32 high word */
 
 /* Burst G: operating mode + fan targets — 41120..41122 */
 #define BURST_G_BASE   41120
@@ -245,4 +246,29 @@ esp_err_t wrg2_set_fan_level(uint8_t m3h)
 {
     if (m3h > 100) m3h = 100;
     return wrg2_set_mode(3, (uint8_t)(m3h * 2));
+}
+
+esp_err_t wrg2_set_mode_unbalanced(uint8_t supply_m3h, uint8_t exhaust_m3h)
+{
+    if (supply_m3h  > 100) supply_m3h  = 100;
+    if (exhaust_m3h > 100) exhaust_m3h = 100;
+
+    esp_err_t err;
+    err = modbus_rtu_write_reg(s_slave, 41120, 4);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "unbal: write 41120 failed"); return err; }
+    err = modbus_rtu_write_reg(s_slave, 41121, (uint16_t)(supply_m3h  * 2));
+    if (err != ESP_OK) { ESP_LOGE(TAG, "unbal: write 41121 failed"); return err; }
+    err = modbus_rtu_write_reg(s_slave, 41122, (uint16_t)(exhaust_m3h * 2));
+    if (err != ESP_OK) { ESP_LOGE(TAG, "unbal: write 41122 failed"); return err; }
+    err = modbus_rtu_write_reg(s_slave, 41132, 0);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "unbal: write 41132 (commit) failed"); return err; }
+
+    ESP_LOGI(TAG, "set_mode_unbalanced OK: supply=%u exhaust=%u m³/h",
+             supply_m3h, exhaust_m3h);
+    return ESP_OK;
+}
+
+esp_err_t wrg2_write_config(uint16_t addr, uint16_t value)
+{
+    return modbus_rtu_write_reg(s_slave, addr, value);
 }

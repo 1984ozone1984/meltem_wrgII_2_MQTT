@@ -21,16 +21,16 @@ static const char *TAG = "app_main";
  * MQTT event handler (mqtt_manager) posts commands here.
  * control_task() processes them from the Modbus task context.
  * ----------------------------------------------------------------------- */
-typedef enum { CMD_MODE, CMD_FAN } cmd_type_t;
+typedef enum { CMD_MODE, CMD_FAN, CMD_FAN_EXHAUST } cmd_type_t;
 
 typedef struct {
     cmd_type_t type;
-    char       payload[32];   /* "off" / "humidity" / "manual"  or "0"-"100" */
+    char       payload[32];   /* mode string, or "N" or "N,M" for fan m³/h */
 } wrg2_cmd_t;
 
 static QueueHandle_t s_cmd_queue;
 
-/* Called by mqtt_manager via extern declaration */
+/* Called by mqtt_manager and config_server via extern declarations */
 void wrg2_enqueue_mode(const char *payload)
 {
     wrg2_cmd_t cmd = { .type = CMD_MODE };
@@ -45,13 +45,21 @@ void wrg2_enqueue_fan(const char *payload)
     xQueueSend(s_cmd_queue, &cmd, 0);
 }
 
+void wrg2_enqueue_fan_exhaust(const char *payload)
+{
+    wrg2_cmd_t cmd = { .type = CMD_FAN_EXHAUST };
+    strncpy(cmd.payload, payload, sizeof(cmd.payload) - 1);
+    xQueueSend(s_cmd_queue, &cmd, 0);
+}
+
 /* ── Mode helpers ──────────────────────────────────────────────────────────
  * Strings must match the HA select options in ha_discovery.
  * ----------------------------------------------------------------------- */
 static const char *mode_to_str(uint8_t mode, uint8_t fan_target)
 {
     if (mode == 1) return "off";
-    if (mode == 3 || mode == 4) return "manual";
+    if (mode == 3) return "manual";
+    if (mode == 4) return "manual_unbal";
     /* mode=2 (regulated) and mode=0 (default/unset) → humidity for -F variant */
     (void)fan_target;
     return "humidity";
@@ -76,7 +84,8 @@ static void publish_status(const wrg2_data_t *d)
     PUB("wrg2/status/humidity_supply",     "%u",   d->humidity_supply);
     PUB("wrg2/status/fan_supply_m3h",      "%u",   d->fan_supply_m3h);
     PUB("wrg2/status/fan_exhaust_m3h",     "%u",   d->fan_exhaust_m3h);
-    PUB("wrg2/status/fan_level",           "%u",   d->fan_target_supply / 2);
+    PUB("wrg2/status/fan_level",           "%u",   d->fan_target_supply  / 2);
+    PUB("wrg2/status/fan_exhaust_level",   "%u",   d->fan_target_exhaust / 2);
     PUB("wrg2/status/frost_active",        "%s",   d->frost_active ? "ON" : "OFF");
     PUB("wrg2/status/error",               "%s",   d->error_flag   ? "ON" : "OFF");
     PUB("wrg2/status/filter_due",          "%s",   d->filter_due   ? "ON" : "OFF");
@@ -157,10 +166,18 @@ static void control_task(void *arg)
             } else if (strcmp(cmd.payload, "humidity") == 0) {
                 err = wrg2_set_mode(2, 112);
             } else if (strcmp(cmd.payload, "manual") == 0) {
-                /* Set manual balanced at current target, or 50 m³/h if unknown */
                 wrg2_data_t cur;
-                uint8_t fan = wrg2_get_last_data(&cur) ? cur.fan_target_supply : 100;
-                err = wrg2_set_mode(3, fan ? fan : 100);
+                uint8_t fan = (wrg2_get_last_data(&cur) && cur.fan_target_supply)
+                              ? cur.fan_target_supply : 100;
+                err = wrg2_set_mode(3, fan);
+            } else if (strcmp(cmd.payload, "manual_unbal") == 0) {
+                wrg2_data_t cur;
+                uint8_t s = 100, e = 100;
+                if (wrg2_get_last_data(&cur)) {
+                    s = cur.fan_target_supply  ? cur.fan_target_supply  : 100;
+                    e = cur.fan_target_exhaust ? cur.fan_target_exhaust : 100;
+                }
+                err = wrg2_set_mode_unbalanced(s / 2, e / 2);
             } else {
                 ESP_LOGW(TAG, "control: unknown mode '%s'", cmd.payload);
                 continue;
@@ -169,8 +186,25 @@ static void control_task(void *arg)
             int m3h = atoi(cmd.payload);
             if (m3h < 0) m3h = 0;
             if (m3h > 100) m3h = 100;
-            ESP_LOGI(TAG, "control: set fan → %d m³/h", m3h);
-            err = wrg2_set_fan_level((uint8_t)m3h);
+            ESP_LOGI(TAG, "control: set supply fan → %d m³/h", m3h);
+            /* If currently in unbalanced mode, keep exhaust target */
+            wrg2_data_t cur;
+            if (wrg2_get_last_data(&cur) && cur.mode == 4) {
+                err = wrg2_set_mode_unbalanced((uint8_t)m3h,
+                                               cur.fan_target_exhaust / 2);
+            } else {
+                err = wrg2_set_fan_level((uint8_t)m3h);
+            }
+        } else if (cmd.type == CMD_FAN_EXHAUST) {
+            int m3h = atoi(cmd.payload);
+            if (m3h < 0) m3h = 0;
+            if (m3h > 100) m3h = 100;
+            ESP_LOGI(TAG, "control: set exhaust fan → %d m³/h", m3h);
+            wrg2_data_t cur;
+            uint8_t supply = 50; /* default 25 m³/h if no current data */
+            if (wrg2_get_last_data(&cur) && cur.fan_target_supply)
+                supply = cur.fan_target_supply / 2;
+            err = wrg2_set_mode_unbalanced(supply, (uint8_t)m3h);
         }
 
         if (err == ESP_OK) {
