@@ -106,6 +106,7 @@ static void reboot_task(void *arg)
 static const char *mode_str(uint8_t mode, uint8_t fan_target)
 {
     switch (mode) {
+        case 0: return "Default (unset)";  /* factory state, no explicit mode written */
         case 1: return "Off";
         case 2:
             if (fan_target == 16)  return "Automatic";
@@ -159,13 +160,20 @@ static esp_err_t root_get(httpd_req_t *req)
             d.temp_supply, d.temp_extract, d.temp_exhaust, d.temp_outdoor);
 
         /* ── Air quality ── */
+        char co2_cell[64];
+        if (d.co2_extract == 0x7FFF) {
+            snprintf(co2_cell, sizeof(co2_cell), "<span style='color:#aaa'>N/A (no sensor)</span>");
+        } else {
+            snprintf(co2_cell, sizeof(co2_cell),
+                     "<span class=big>%u</span><span class=unit>ppm</span>", d.co2_extract);
+        }
         n += snprintf(buf + n, 6144 - n,
             "<div class=box><h2>Air Quality</h2><table>"
             "<tr><th>Humidity extract</th><td><span class=big>%u</span><span class=unit>%%</span></td></tr>"
             "<tr><th>Humidity supply</th><td><span class=big>%u</span><span class=unit>%%</span></td></tr>"
-            "<tr><th>CO2 extract</th><td><span class=big>%u</span><span class=unit>ppm</span></td></tr>"
+            "<tr><th>CO2 extract</th><td>%s</td></tr>"
             "</table></div>",
-            d.humidity_extract, d.humidity_supply, d.co2_extract);
+            d.humidity_extract, d.humidity_supply, co2_cell);
 
         /* ── Fans & Mode ── */
         n += snprintf(buf + n, 6144 - n,

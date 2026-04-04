@@ -17,12 +17,12 @@ static const char *TAG = "app_main";
 static const char *mode_to_str(uint8_t mode)
 {
     switch (mode) {
+        case 0: return "default";   /* factory/unset state */
         case 1: return "off";
-        case 2: return "auto";
-        case 3: /* balanced manual */
-        case 4: /* unbalanced manual */
-            return "manual";
-        default: return "auto";
+        case 2: return "regulated"; /* sub-mode depends on fan target */
+        case 3: return "manual_bal";
+        case 4: return "manual_unbal";
+        default: return "unknown";
     }
 }
 
@@ -43,8 +43,13 @@ static void polling_task(void *arg)
                      data.fan_supply_m3h, data.fan_exhaust_m3h,
                      data.fan_target_supply, data.fan_target_exhaust,
                      mode_to_str(data.mode), data.mode);
-            ESP_LOGI(TAG, "[AIR]    hum_extract=%u%%  hum_supply=%u%%  co2=%uppm",
-                     data.humidity_extract, data.humidity_supply, data.co2_extract);
+            if (data.co2_extract == 0x7FFF) {
+                ESP_LOGI(TAG, "[AIR]    hum_extract=%u%%  hum_supply=%u%%  co2=N/A (no sensor)",
+                         data.humidity_extract, data.humidity_supply);
+            } else {
+                ESP_LOGI(TAG, "[AIR]    hum_extract=%u%%  hum_supply=%u%%  co2=%uppm",
+                         data.humidity_extract, data.humidity_supply, data.co2_extract);
+            }
             ESP_LOGI(TAG, "[STATUS] error=%u  filter_due=%u  frost=%u  filter_days=%u  dev_h=%lu  mot_h=%lu",
                      data.error_flag, data.filter_due, data.frost_active,
                      data.filter_days_left,
