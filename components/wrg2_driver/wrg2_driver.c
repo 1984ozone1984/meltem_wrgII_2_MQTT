@@ -232,13 +232,17 @@ esp_err_t wrg2_set_mode(uint8_t mode, uint8_t fan_target)
     err = modbus_rtu_write_reg(s_slave, 41120, mode);
     if (err != ESP_OK) { ESP_LOGE(TAG, "set_mode: write 41120 failed"); return err; }
 
-    err = modbus_rtu_write_reg(s_slave, 41121, fan_target);
-    if (err != ESP_OK) { ESP_LOGE(TAG, "set_mode: write 41121 failed"); return err; }
+    /* 41121 is "nicht benutzt" (not used) for mode=1 (off) — skip it */
+    if (mode != 1) {
+        err = modbus_rtu_write_reg(s_slave, 41121, fan_target);
+        if (err != ESP_OK) { ESP_LOGE(TAG, "set_mode: write 41121 failed"); return err; }
+    }
 
     err = modbus_rtu_write_reg(s_slave, 41132, 0);
     if (err != ESP_OK) { ESP_LOGE(TAG, "set_mode: write 41132 (commit) failed"); return err; }
 
-    ESP_LOGI(TAG, "set_mode OK: mode=%u fan_target=%u", mode, fan_target);
+    ESP_LOGI(TAG, "set_mode OK: mode=%u%s", mode,
+             mode != 1 ? "" : " (off, 41121 skipped)");
     return ESP_OK;
 }
 

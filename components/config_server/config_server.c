@@ -291,46 +291,51 @@ static esp_err_t control_get(httpd_req_t *req)
         return ESP_OK;
     }
 
-    /* ── Operating mode ── */
-    const char *modes[] = {"off","humidity","manual","manual_unbal"};
-    const char *mode_labels[] = {"Off","Humidity controlled","Manual balanced","Manual unbalanced"};
-    n += snprintf(buf + n, 6144 - n,
-        "<div class=box><h2>Operating Mode</h2>"
-        "<form method=POST action=/control/mode>"
-        "<label>Mode</label><select name=mode style='width:100%%;padding:8px;"
-        "border:1px solid #ccc;border-radius:4px;font-size:1em;'>");
+    /* Current mode badge */
     const char *cur_mode = mode_str(d.mode, d.fan_target_supply);
-    for (int i = 0; i < 4; i++) {
-        n += snprintf(buf + n, 6144 - n,
-            "<option value='%s'%s>%s</option>",
-            modes[i],
-            strcmp(cur_mode, modes[i]) == 0 ? " selected" : "",
-            mode_labels[i]);
-    }
     n += snprintf(buf + n, 6144 - n,
-        "</select>"
-        "<button type=submit>Set Mode</button>"
+        "<div class=box style='border-left:4px solid #1a73e8'>"
+        "<b>Current mode:</b> %s &nbsp;"
+        "<span style='color:#888;font-size:.9em'>"
+        "(supply %um&#179;/h actual, exhaust %um&#179;/h actual)</span>"
+        "</div>",
+        cur_mode, d.fan_supply_m3h, d.fan_exhaust_m3h);
+
+    /* ── Mode: Off (41120=1, 41132=0; 41121 not used) ── */
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=box><h2>Off &mdash; writes: 41120=1, 41132=0</h2>"
+        "<form method=POST action=/control/mode>"
+        "<input type=hidden name=mode value=off>"
+        "<button type=submit class=r>Switch Off</button>"
         "</form></div>");
 
-    /* ── Balanced fan ── */
+    /* ── Mode: Humidity (41120=2, 41121=112, 41132=0) ── */
     n += snprintf(buf + n, 6144 - n,
-        "<div class=box><h2>Manual Balanced Fan Speed</h2>"
+        "<div class=box><h2>Humidity Controlled &mdash; writes: 41120=2, 41121=112, 41132=0</h2>"
+        "<form method=POST action=/control/mode>"
+        "<input type=hidden name=mode value=humidity>"
+        "<button type=submit>Enable Humidity Control</button>"
+        "</form></div>");
+
+    /* ── Mode 3: Balanced manual (41120=3, 41121=fan*2, 41132=0) ── */
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=box><h2>Manual Balanced &mdash; writes: 41120=3, 41121=speed&times;2, 41132=0</h2>"
         "<form method=POST action=/control/fan>"
-        "<label>Supply &amp; Exhaust (0&ndash;100 m&#179;/h)</label>"
+        "<label>Fan speed &mdash; supply &amp; exhaust equal (0&ndash;100 m&#179;/h)</label>"
         "<input type=number name=fan min=0 max=100 step=5 value=%u>"
-        "<button type=submit>Set</button>"
+        "<button type=submit>Set Balanced Speed</button>"
         "</form></div>",
         d.fan_target_supply / 2);
 
-    /* ── Unbalanced fan ── */
+    /* ── Mode 4: Unbalanced manual (41120=4, 41121=sup*2, 41122=exh*2, 41132=0) ── */
     n += snprintf(buf + n, 6144 - n,
-        "<div class=box><h2>Manual Unbalanced Fan Speed</h2>"
+        "<div class=box><h2>Manual Unbalanced &mdash; writes: 41120=4, 41121=supply&times;2, 41122=exhaust&times;2, 41132=0</h2>"
         "<form method=POST action=/control/fan_unbal>"
         "<label>Supply (Zuluft) 0&ndash;100 m&#179;/h</label>"
         "<input type=number name=supply min=0 max=100 step=5 value=%u>"
         "<label>Exhaust (Fortluft) 0&ndash;100 m&#179;/h</label>"
         "<input type=number name=exhaust min=0 max=100 step=5 value=%u>"
-        "<button type=submit>Set Unbalanced</button>"
+        "<button type=submit>Set Unbalanced Speed</button>"
         "</form></div>",
         d.fan_target_supply  / 2,
         d.fan_target_exhaust / 2);
