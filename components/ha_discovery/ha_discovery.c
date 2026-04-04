@@ -12,6 +12,14 @@ extern int mqtt_publish(const char *topic, const char *payload, int qos, int ret
     "\"device\":{\"identifiers\":[\"wrg2mqtt\"],\"name\":\"Meltem M-WRG-II\"," \
     "\"manufacturer\":\"Meltem\",\"model\":\"M-WRG-II\"}"
 
+/* entity_category shortcuts — controls where entity appears on the device page:
+ *   (none)       → main card: Temperatures, Air Quality, Fan Speeds, Controls
+ *   DIAG         → Diagnostic section: Status & Maintenance
+ *   CFG          → Configuration section: Humidity Config, Ext Input Config
+ */
+#define DIAG "\"entity_category\":\"diagnostic\","
+#define CFG  "\"entity_category\":\"config\","
+
 static void pub(const char *topic, const char *payload)
 {
     mqtt_publish(topic, payload, 1, 1);
@@ -39,7 +47,9 @@ void ha_discovery_publish(void)
     del("homeassistant/number/wrg2_fan_level/config");
     del("homeassistant/number/wrg2_fan_exhaust_level/config");
 
-    /* ── Temperature sensors ─────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════════════
+     * TEMPERATURES  (main card)
+     * ════════════════════════════════════════════════════════════════════════ */
 
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Supply Air Temperature\","
@@ -73,7 +83,9 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_temp_outdoor\"," DEV "}");
     pub("homeassistant/sensor/wrg2_temp_outdoor/config", buf);
 
-    /* ── Humidity sensors ────────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════════════
+     * AIR QUALITY  (main card)
+     * ════════════════════════════════════════════════════════════════════════ */
 
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Extract Air Humidity\","
@@ -91,8 +103,6 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_hum_supply\"," DEV "}");
     pub("homeassistant/sensor/wrg2_hum_supply/config", buf);
 
-    /* ── Actual fan speed sensors ────────────────────────────────────────── */
-
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Supply Fan Speed\","
         "\"state_topic\":\"wrg2/status/fan_supply_m3h\","
@@ -109,13 +119,23 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_fan_exhaust\"," DEV "}");
     pub("homeassistant/sensor/wrg2_fan_exhaust/config", buf);
 
-    /* ── Status binary sensors ───────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════════════
+     * STATUS & MAINTENANCE  (Diagnostic section)
+     * ════════════════════════════════════════════════════════════════════════ */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Operating Mode\","
+        "\"state_topic\":\"wrg2/status/operating_mode\","
+        DIAG
+        "\"unique_id\":\"wrg2_operating_mode\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_operating_mode/config", buf);
 
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Error\","
         "\"state_topic\":\"wrg2/status/error\","
         "\"payload_on\":\"ON\",\"payload_off\":\"OFF\","
         "\"device_class\":\"problem\","
+        DIAG
         "\"unique_id\":\"wrg2_error\"," DEV "}");
     pub("homeassistant/binary_sensor/wrg2_error/config", buf);
 
@@ -124,6 +144,7 @@ void ha_discovery_publish(void)
         "\"state_topic\":\"wrg2/status/filter_due\","
         "\"payload_on\":\"ON\",\"payload_off\":\"OFF\","
         "\"device_class\":\"problem\","
+        DIAG
         "\"unique_id\":\"wrg2_filter_due\"," DEV "}");
     pub("homeassistant/binary_sensor/wrg2_filter_due/config", buf);
 
@@ -132,19 +153,42 @@ void ha_discovery_publish(void)
         "\"state_topic\":\"wrg2/status/frost_active\","
         "\"payload_on\":\"ON\",\"payload_off\":\"OFF\","
         "\"device_class\":\"cold\","
+        DIAG
         "\"unique_id\":\"wrg2_frost\"," DEV "}");
     pub("homeassistant/binary_sensor/wrg2_frost/config", buf);
 
-    /* ── Mode status sensor ──────────────────────────────────────────────── */
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Filter Days Remaining\","
+        "\"state_topic\":\"wrg2/status/filter_days_left\","
+        "\"unit_of_measurement\":\"d\","
+        "\"state_class\":\"measurement\","
+        DIAG
+        "\"unique_id\":\"wrg2_filter_days\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_filter_days/config", buf);
 
     snprintf(buf, sizeof(buf),
-        "{\"name\":\"Operating Mode\","
-        "\"state_topic\":\"wrg2/status/operating_mode\","
-        "\"unique_id\":\"wrg2_operating_mode\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_operating_mode/config", buf);
+        "{\"name\":\"Device Operating Hours\","
+        "\"state_topic\":\"wrg2/status/hours_device\","
+        "\"unit_of_measurement\":\"h\","
+        "\"state_class\":\"total_increasing\","
+        DIAG
+        "\"unique_id\":\"wrg2_hours_device\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_hours_device/config", buf);
 
-    /* ── Control: Off button (41120=1, 41132=0) ──────────────────────────── */
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Motor Operating Hours\","
+        "\"state_topic\":\"wrg2/status/hours_motors\","
+        "\"unit_of_measurement\":\"h\","
+        "\"state_class\":\"total_increasing\","
+        DIAG
+        "\"unique_id\":\"wrg2_hours_motors\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_hours_motors/config", buf);
 
+    /* ════════════════════════════════════════════════════════════════════════
+     * CONTROL  (main card)
+     * ════════════════════════════════════════════════════════════════════════ */
+
+    /* Off button (41120=1, 41132=0) */
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Switch Off\","
         "\"command_topic\":\"wrg2/control/mode/set\","
@@ -152,8 +196,7 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_btn_off\"," DEV "}");
     pub("homeassistant/button/wrg2_btn_off/config", buf);
 
-    /* ── Control: Humidity button (41120=2, 41121=112, 41132=0) ─────────── */
-
+    /* Humidity button (41120=2, 41121=112, 41132=0) */
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Humidity Control\","
         "\"command_topic\":\"wrg2/control/mode/set\","
@@ -161,8 +204,7 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_btn_humidity\"," DEV "}");
     pub("homeassistant/button/wrg2_btn_humidity/config", buf);
 
-    /* ── Control: Balanced fan number (41120=3, 41121=val*2, 41132=0) ────── */
-
+    /* Balanced fan number (41120=3, 41121=val*2, 41132=0) */
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Manual Balanced Fan\","
         "\"state_topic\":\"wrg2/status/fan_supply_target\","
@@ -172,8 +214,7 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_fan_balanced\"," DEV "}");
     pub("homeassistant/number/wrg2_fan_balanced/config", buf);
 
-    /* ── Control: Unbalanced supply (41120=4, 41121=val*2, 41132=0) ──────── */
-
+    /* Unbalanced supply (41120=4, 41121=val*2, 41132=0) */
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Unbalanced Supply Fan\","
         "\"state_topic\":\"wrg2/status/fan_supply_target\","
@@ -183,8 +224,7 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_fan_unbal_supply\"," DEV "}");
     pub("homeassistant/number/wrg2_fan_unbal_supply/config", buf);
 
-    /* ── Control: Unbalanced exhaust (41120=4, 41122=val*2, 41132=0) ─────── */
-
+    /* Unbalanced exhaust (41120=4, 41122=val*2, 41132=0) */
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Unbalanced Exhaust Fan\","
         "\"state_topic\":\"wrg2/status/fan_exhaust_target\","
@@ -194,33 +234,9 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_fan_unbal_exhaust\"," DEV "}");
     pub("homeassistant/number/wrg2_fan_unbal_exhaust/config", buf);
 
-    /* ── Maintenance sensors ────────────────────────────────────────────────── */
-
-    snprintf(buf, sizeof(buf),
-        "{\"name\":\"Filter Days Remaining\","
-        "\"state_topic\":\"wrg2/status/filter_days_left\","
-        "\"unit_of_measurement\":\"d\","
-        "\"state_class\":\"measurement\","
-        "\"unique_id\":\"wrg2_filter_days\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_filter_days/config", buf);
-
-    snprintf(buf, sizeof(buf),
-        "{\"name\":\"Device Operating Hours\","
-        "\"state_topic\":\"wrg2/status/hours_device\","
-        "\"unit_of_measurement\":\"h\","
-        "\"state_class\":\"total_increasing\","
-        "\"unique_id\":\"wrg2_hours_device\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_hours_device/config", buf);
-
-    snprintf(buf, sizeof(buf),
-        "{\"name\":\"Motor Operating Hours\","
-        "\"state_topic\":\"wrg2/status/hours_motors\","
-        "\"unit_of_measurement\":\"h\","
-        "\"state_class\":\"total_increasing\","
-        "\"unique_id\":\"wrg2_hours_motors\"," DEV "}");
-    pub("homeassistant/sensor/wrg2_hours_motors/config", buf);
-
-    /* ── Humidity control config (42000-42002) ──────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════════════
+     * HUMIDITY CONTROL CONFIG  (Configuration section)
+     * ════════════════════════════════════════════════════════════════════════ */
 
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Humidity Start Setpoint\","
@@ -228,6 +244,7 @@ void ha_discovery_publish(void)
         "\"command_topic\":\"wrg2/config/hum_setpoint/set\","
         "\"min\":40,\"max\":80,\"step\":1,"
         "\"unit_of_measurement\":\"%%\","
+        CFG
         "\"unique_id\":\"wrg2_cfg_hum_sp\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_hum_sp/config", buf);
 
@@ -237,6 +254,7 @@ void ha_discovery_publish(void)
         "\"command_topic\":\"wrg2/config/hum_fan_min/set\","
         "\"min\":0,\"max\":100,\"step\":1,"
         "\"unit_of_measurement\":\"%%\","
+        CFG
         "\"unique_id\":\"wrg2_cfg_hum_fan_min\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_hum_fan_min/config", buf);
 
@@ -246,10 +264,13 @@ void ha_discovery_publish(void)
         "\"command_topic\":\"wrg2/config/hum_fan_max/set\","
         "\"min\":0,\"max\":100,\"step\":1,"
         "\"unit_of_measurement\":\"%%\","
+        CFG
         "\"unique_id\":\"wrg2_cfg_hum_fan_max\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_hum_fan_max/config", buf);
 
-    /* ── External input config (42007-42009) ───────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════════════
+     * EXTERNAL INPUT CONFIG  (Configuration section)
+     * ════════════════════════════════════════════════════════════════════════ */
 
     snprintf(buf, sizeof(buf),
         "{\"name\":\"Ext Input Fan Level\","
@@ -257,6 +278,7 @@ void ha_discovery_publish(void)
         "\"command_topic\":\"wrg2/config/ext_fan_level/set\","
         "\"min\":0,\"max\":100,\"step\":1,"
         "\"unit_of_measurement\":\"%%\","
+        CFG
         "\"unique_id\":\"wrg2_cfg_ext_fan\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_ext_fan/config", buf);
 
@@ -266,6 +288,7 @@ void ha_discovery_publish(void)
         "\"command_topic\":\"wrg2/config/ext_on_delay/set\","
         "\"min\":0,\"max\":60,\"step\":1,"
         "\"unit_of_measurement\":\"min\","
+        CFG
         "\"unique_id\":\"wrg2_cfg_ext_on\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_ext_on/config", buf);
 
@@ -275,6 +298,7 @@ void ha_discovery_publish(void)
         "\"command_topic\":\"wrg2/config/ext_off_delay/set\","
         "\"min\":0,\"max\":120,\"step\":1,"
         "\"unit_of_measurement\":\"min\","
+        CFG
         "\"unique_id\":\"wrg2_cfg_ext_off\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_ext_off/config", buf);
 
