@@ -531,6 +531,21 @@ static esp_err_t config_get(httpd_req_t *req)
         "<button type=submit>Save MQTT</button>"
         "</form></div>"
 
+        "<div class=box><h2>Modbus &amp; Polling</h2>"
+        "<form method=POST action=/config/modbus>"
+        "<label>Slave ID</label>"
+        "<input type=number name=slave_id value='%u' min=1 max=247>"
+        "<label>Baud Rate</label>"
+        "<input type=number name=baud value='%lu' min=1200 max=115200>"
+        "<label>Poll Interval (s) — how often to read Modbus</label>"
+        "<input type=number name=poll_ivl value='%lu' min=1 max=300>"
+        "<label>Publish Interval (s) — how often to send to MQTT</label>"
+        "<input type=number name=pub_ivl value='%lu' min=1 max=3600>"
+        "<p style='color:#888;font-size:.9em'>Publish interval should be &ge; poll interval. "
+        "Takes effect immediately (no reboot needed).</p>"
+        "<button type=submit>Save Modbus &amp; Polling</button>"
+        "</form></div>"
+
         "<div class=box><h2>Device</h2>"
         "<form method=POST action=/reboot>"
         "<button type=submit class=r>Reboot</button>"
@@ -541,7 +556,11 @@ static esp_err_t config_get(httpd_req_t *req)
         g_config.hostname,
         g_config.wifi_ssid,
         g_config.mqtt_url,
-        g_config.mqtt_user);
+        g_config.mqtt_user,
+        (unsigned)g_config.mb_slave_id,
+        (unsigned long)g_config.mb_baud,
+        (unsigned long)g_config.poll_interval,
+        (unsigned long)g_config.pub_interval);
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
@@ -635,6 +654,50 @@ static esp_err_t config_mqtt_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ── POST /config/modbus ──────────────────────────────────────────────────── */
+
+static esp_err_t config_modbus_post(httpd_req_t *req)
+{
+    char body[256];
+    read_body(req, body, sizeof(body));
+
+    char s_slave[8] = {0}, s_baud[8] = {0}, s_poll[8] = {0}, s_pub[8] = {0};
+    get_field(body, "slave_id", s_slave, sizeof(s_slave));
+    get_field(body, "baud",     s_baud,  sizeof(s_baud));
+    get_field(body, "poll_ivl", s_poll,  sizeof(s_poll));
+    get_field(body, "pub_ivl",  s_pub,   sizeof(s_pub));
+
+    uint8_t  slave_id     = (uint8_t)atoi(s_slave);
+    uint32_t baud         = (uint32_t)atoi(s_baud);
+    uint32_t poll_interval = (uint32_t)atoi(s_poll);
+    uint32_t pub_interval  = (uint32_t)atoi(s_pub);
+
+    /* Clamp to sane ranges */
+    if (slave_id < 1)            slave_id = 1;
+    if (slave_id > 247)          slave_id = 247;
+    if (baud < 1200)             baud = 1200;
+    if (baud > 115200)           baud = 115200;
+    if (poll_interval < 1)       poll_interval = 1;
+    if (poll_interval > 300)     poll_interval = 300;
+    if (pub_interval < 1)        pub_interval = 1;
+    if (pub_interval > 3600)     pub_interval = 3600;
+    if (pub_interval < poll_interval) pub_interval = poll_interval;
+
+    config_manager_save_modbus(slave_id, baud, poll_interval, pub_interval);
+
+    const char *resp =
+        "<!DOCTYPE html><html><head><meta charset=UTF-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>Saved</title></head><body style='font-family:sans-serif;padding:20px'>"
+        "<h2>&#10003; Modbus &amp; Polling settings saved</h2>"
+        "<p>New intervals take effect immediately.</p>"
+        "<p><a href='/config'>Back to settings</a></p>"
+        "</body></html>";
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 /* ── POST /reboot ─────────────────────────────────────────────────────────── */
 
 static esp_err_t reboot_post(httpd_req_t *req)
@@ -676,6 +739,7 @@ esp_err_t config_server_start(void)
         { .uri = "/config/hostname",   .method = HTTP_POST, .handler = config_hostname_post },
         { .uri = "/config/wifi",       .method = HTTP_POST, .handler = config_wifi_post     },
         { .uri = "/config/mqtt",       .method = HTTP_POST, .handler = config_mqtt_post     },
+        { .uri = "/config/modbus",     .method = HTTP_POST, .handler = config_modbus_post   },
         { .uri = "/reboot",            .method = HTTP_POST, .handler = reboot_post          },
     };
     for (int i = 0; i < (int)(sizeof(uris) / sizeof(uris[0])); i++) {

@@ -165,7 +165,8 @@ After connecting to your network, the device is reachable at `http://<hostname>.
 | MQTT Username / Password | — | Optional |
 | Modbus Slave ID | `1` | |
 | Modbus Baud Rate | `19200` | |
-| Poll Interval | `10` | Seconds |
+| Poll Interval | `10` | Seconds — how often to read Modbus registers |
+| Publish Interval | `30` | Seconds — how often to send values to MQTT (≥ poll interval) |
 
 All settings are stored in ESP32 NVS flash — no credentials in firmware.
 

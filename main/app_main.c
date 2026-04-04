@@ -138,6 +138,7 @@ static void publish_status(const wrg2_data_t *d)
 static void polling_task(void *arg)
 {
     wrg2_data_t data;
+    uint32_t    secs_since_pub = 0;  /* counts up by poll_interval each loop */
 
     esp_task_wdt_add(NULL);
     while (1) {
@@ -167,8 +168,11 @@ static void polling_task(void *arg)
                      data.cfg_co2_setpoint, data.cfg_co2_fan_min, data.cfg_co2_fan_max,
                      data.cfg_ext_fan_level, data.cfg_ext_on_delay, data.cfg_ext_off_delay);
 
-            if (mqtt_manager_is_connected()) {
+            secs_since_pub += g_config.poll_interval;
+            if (mqtt_manager_is_connected() &&
+                secs_since_pub >= g_config.pub_interval) {
                 publish_status(&data);
+                secs_since_pub = 0;
                 if (data.error_flag) ESP_LOGW(TAG, "Device reports error — check unit");
                 if (data.filter_due) ESP_LOGW(TAG, "Filter change due");
             }
