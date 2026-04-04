@@ -74,3 +74,24 @@ esp_err_t wrg2_read_all(wrg2_data_t *data);
  * Returns false if no successful read has happened yet.
  */
 bool wrg2_get_last_data(wrg2_data_t *out);
+
+/**
+ * Set operating mode. Writes 41120 (mode), 41121 (fan_target), then
+ * 41132 (commit=0) in sequence as required by the datasheet.
+ *
+ * Common mode+fan_target combinations:
+ *   mode=1, fan=0   → Off
+ *   mode=2, fan=112 → Humidity controlled  (P-M-F / E-M-F)
+ *   mode=2, fan=144 → CO2 controlled       (P-M-FC / E-M-FC only)
+ *   mode=2, fan=16  → Automatic            (P-M-FC / E-M-FC only)
+ *   mode=3, fan=N   → Manual balanced, N ∈ [0,200] → [0,100] m³/h
+ *
+ * Returns ESP_OK only if all three writes succeed.
+ */
+esp_err_t wrg2_set_mode(uint8_t mode, uint8_t fan_target);
+
+/**
+ * Set balanced manual fan speed. Equivalent to wrg2_set_mode(3, m3h*2).
+ * m3h is clamped to [0, 100].
+ */
+esp_err_t wrg2_set_fan_level(uint8_t m3h);

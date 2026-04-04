@@ -14,9 +14,12 @@ static volatile bool            s_connected = false;
 
 /* Control topics */
 #define TOPIC_FAN_SET    "wrg2/control/fan_level/set"
-#define TOPIC_BYPASS_SET "wrg2/control/bypass/set"
 #define TOPIC_MODE_SET   "wrg2/control/mode/set"
 #define TOPIC_OTA        "wrg2/ota/trigger"
+
+/* Implemented in app_main.c — post commands to the control queue */
+extern void wrg2_enqueue_mode(const char *payload);
+extern void wrg2_enqueue_fan(const char *payload);
 
 /* Availability topic */
 #define TOPIC_AVAIL      "wrg2/availability"
@@ -36,10 +39,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         esp_mqtt_client_publish(s_client, TOPIC_AVAIL, "online", 6, 1, 1);
 
         /* Subscribe to control topics */
-        esp_mqtt_client_subscribe(s_client, TOPIC_FAN_SET,    1);
-        esp_mqtt_client_subscribe(s_client, TOPIC_BYPASS_SET, 1);
-        esp_mqtt_client_subscribe(s_client, TOPIC_MODE_SET,   1);
-        esp_mqtt_client_subscribe(s_client, TOPIC_OTA,        1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_FAN_SET,  1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_MODE_SET, 1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_OTA,      1);
 
         /* Re-publish HA discovery on every (re)connect */
         ha_discovery_publish();
@@ -68,6 +70,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         if (strcmp(topic, TOPIC_OTA) == 0) {
             ESP_LOGI(TAG, "OTA trigger received, URL: %s", payload);
             ota_manager_handle_trigger(payload);
+        } else if (strcmp(topic, TOPIC_MODE_SET) == 0) {
+            ESP_LOGI(TAG, "mode set: %s", payload);
+            wrg2_enqueue_mode(payload);
+        } else if (strcmp(topic, TOPIC_FAN_SET) == 0) {
+            ESP_LOGI(TAG, "fan set: %s m³/h", payload);
+            wrg2_enqueue_fan(payload);
         }
         break;
     }

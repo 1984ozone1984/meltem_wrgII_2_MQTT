@@ -18,3 +18,10 @@ esp_err_t modbus_rtu_init(uart_port_t port, int tx_gpio, int rx_gpio,
 esp_err_t modbus_rtu_read_regs(uint8_t slave, uint8_t fc,
                                  uint16_t start, uint16_t count,
                                  uint16_t *out);
+
+/**
+ * Write a single holding register via FC06.
+ * Response is an echo of the request; validated before returning.
+ * Retries up to 3 times. Returns ESP_OK on success.
+ */
+esp_err_t modbus_rtu_write_reg(uint8_t slave, uint16_t addr, uint16_t value);

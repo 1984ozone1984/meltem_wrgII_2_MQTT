@@ -221,3 +221,28 @@ bool wrg2_get_last_data(wrg2_data_t *out)
     memcpy(out, &s_last_data, sizeof(wrg2_data_t));
     return true;
 }
+
+esp_err_t wrg2_set_mode(uint8_t mode, uint8_t fan_target)
+{
+    /* Datasheet §16.7: write 41120, 41121, then 41132=0 in order.
+     * 41132 (commit) must always be written last. */
+    esp_err_t err;
+
+    err = modbus_rtu_write_reg(s_slave, 41120, mode);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "set_mode: write 41120 failed"); return err; }
+
+    err = modbus_rtu_write_reg(s_slave, 41121, fan_target);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "set_mode: write 41121 failed"); return err; }
+
+    err = modbus_rtu_write_reg(s_slave, 41132, 0);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "set_mode: write 41132 (commit) failed"); return err; }
+
+    ESP_LOGI(TAG, "set_mode OK: mode=%u fan_target=%u", mode, fan_target);
+    return ESP_OK;
+}
+
+esp_err_t wrg2_set_fan_level(uint8_t m3h)
+{
+    if (m3h > 100) m3h = 100;
+    return wrg2_set_mode(3, (uint8_t)(m3h * 2));
+}

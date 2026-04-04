@@ -144,3 +144,69 @@ esp_err_t modbus_rtu_read_regs(uint8_t slave, uint8_t fc,
     }
     return ret;
 }
+
+esp_err_t modbus_rtu_write_reg(uint8_t slave, uint16_t addr, uint16_t value)
+{
+    if (!s_mutex) return ESP_ERR_INVALID_STATE;
+
+    /* FC06 request = echo response: slave(1)+0x06(1)+addr(2)+val(2)+crc(2) */
+    uint8_t req[8];
+    req[0] = slave;
+    req[1] = 0x06;
+    req[2] = (uint8_t)(addr  >> 8);
+    req[3] = (uint8_t)(addr  & 0xFF);
+    req[4] = (uint8_t)(value >> 8);
+    req[5] = (uint8_t)(value & 0xFF);
+    uint16_t req_crc = crc16(req, 6);
+    req[6] = (uint8_t)(req_crc & 0xFF);
+    req[7] = (uint8_t)(req_crc >> 8);
+
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+
+    esp_err_t ret = ESP_FAIL;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        uart_flush_input(s_port);
+        uart_write_bytes(s_port, req, sizeof(req));
+        uart_wait_tx_done(s_port, pdMS_TO_TICKS(100));
+
+        uint8_t resp[8] = {0};
+        int n = uart_read_bytes(s_port, resp, sizeof(resp), pdMS_TO_TICKS(300));
+
+        if (n == 5 && (resp[1] & 0x80)) {
+            ESP_LOGW(TAG, "write slave %u addr %u val %u: EXCEPTION code=0x%02X",
+                     slave, addr, value, resp[2]);
+            break; /* exception won't change on retry */
+        }
+        if (n != 8) {
+            ESP_LOGW(TAG, "write slave %u addr %u: attempt %d short read %d/8",
+                     slave, addr, attempt + 1, n);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        /* Validate CRC */
+        uint16_t recv_crc = (uint16_t)resp[6] | ((uint16_t)resp[7] << 8);
+        if (crc16(resp, 6) != recv_crc) {
+            ESP_LOGW(TAG, "write slave %u addr %u: attempt %d CRC mismatch",
+                     slave, addr, attempt + 1);
+            continue;
+        }
+        /* Echo must match request (slave, fc, addr, value) */
+        if (resp[0] != req[0] || resp[1] != req[1] ||
+            resp[2] != req[2] || resp[3] != req[3] ||
+            resp[4] != req[4] || resp[5] != req[5]) {
+            ESP_LOGW(TAG, "write slave %u addr %u: attempt %d echo mismatch",
+                     slave, addr, attempt + 1);
+            continue;
+        }
+        ret = ESP_OK;
+        break;
+    }
+
+    xSemaphoreGive(s_mutex);
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "write slave %u addr %u val %u: all retries failed",
+                 slave, addr, value);
+    }
+    return ret;
+}
