@@ -96,7 +96,7 @@ Entities are grouped on the HA device page by `entity_category`:
 
 ## MQTT Topics
 
-### Status (published every poll interval, retained)
+### Status (published every publish interval, retained)
 
 | Topic | Payload |
 |-------|---------|

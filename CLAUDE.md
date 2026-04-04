@@ -1,7 +1,7 @@
 # WRG2MQTT — Claude Code Session Memory
 
 ## Project
-ESP-IDF v5.4 firmware for **Seeed XIAO ESP32-S3** that bridges a **Meltem M-WRG-II** heat-recovery ventilation unit (Modbus RTU) to **Home Assistant** via MQTT.
+ESP-IDF v5.4 firmware for **Seeed XIAO ESP32-S3** that bridges a **Meltem M-WRG-II P-M-F** heat-recovery ventilation unit (Modbus RTU) to **Home Assistant** via MQTT.
 
 GitHub: `git@github.com:1984ozone1984/meltem_wrgII_2_MQTT.git`
 
@@ -11,88 +11,59 @@ GitHub: `git@github.com:1984ozone1984/meltem_wrgII_2_MQTT.git`
 
 | Item | Detail |
 |------|--------|
-| MCU | Seeed XIAO ESP32-S3 (ESP32-S3, 8 MB PSRAM, PCB antenna) |
+| MCU | Seeed XIAO ESP32-S3 (ESP32-S3, 8 MB flash, PCB antenna) |
 | Flash device | `/dev/ttyACM0` (USB JTAG/serial, ID 303a:1001) |
-| RS-485 | MAX485 on UART_NUM_1, GPIO43 TX / GPIO44 RX |
-| DE/RE pin | TBD — candidate GPIO2 (D0), confirm against pinout before Phase 2 |
-| Baud | 9600, 8E1 |
+| RS-485 | MAX485 auto-direction module on UART_NUM_1, GPIO43 TX / GPIO44 RX |
+| Baud | 19200, 8E1 (M-WRG-II factory default) |
 | Slave ID | 1 (default, NVS-configurable) |
+| Variant | P-M-F — no CO2 sensor (returns 0x7FFF), no automatic mode, humidity-regulated |
 
-**Antenna gotcha:** XIAO ESP32-S3 has a solder jumper selecting PCB trace vs IPEX connector. Must be on **OB** (on-board) pad or WiFi AP is invisible.
+**Antenna:** XIAO ESP32-S3 has a solder jumper — must be on **OB** (on-board) pad or WiFi AP is invisible.
+
+**Console:** moved to USB-JTAG (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`), so GPIO43/44 are free for UART_NUM_1.
 
 **Flash commands:**
 ```bash
-# Build
 idf.py build
-
-# Flash (port may be busy — kill monitor first)
 idf.py -p /dev/ttyACM0 flash
-
-# Monitor
 idf.py -p /dev/ttyACM0 monitor
 
-# Erase NVS only (useful for clean credential reset)
+# Erase NVS (clean credential reset)
 python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 erase_region 0x9000 0x6000
 
-# Flash from build/ dir if idf.py flash fails due to busy port
+# Flash directly if port busy (monitor running)
 cd build && python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 \
   --before default_reset --after hard_reset write_flash \
   --flash_mode dio --flash_size 8MB --flash_freq 80m \
-  0x0 bootloader/bootloader.bin 0x10000 wrg2mqtt.bin \
-  0x8000 partition_table/partition-table.bin 0xe000 ota_data_initial.bin
+  0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin \
+  0xe000 ota_data_initial.bin 0x10000 wrg2mqtt.bin
 ```
 
 ---
 
-## Phase Status
+## Implementation Status — ALL PHASES COMPLETE ✅
 
-### ✅ Phase 1 — Infrastructure (commit 983e70c)
+### Components
 
-All components build and run. Verified on hardware.
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `system_core` | ✅ | NVS init, task watchdog 60s timeout, trigger_panic=true |
+| `config_manager` | ✅ | NVS namespace `wrg2_cfg`, all fields including pub_interval |
+| `wifi_manager` | ✅ | STA → AP fallback, mDNS, AT country code, full TX power |
+| `config_server` | ✅ | HTTP portal port 80, all config forms + control page |
+| `modbus_rtu` | ✅ | Direct UART driver, FC03 read, FC06 write, CRC16, 3× retry, mutex |
+| `wrg2_driver` | ✅ | 9-burst register map, wrg2_read_all(), wrg2_set_mode*(), wrg2_write_config() |
+| `mqtt_manager` | ✅ | MQTT client, LWT, subscriptions, HA discovery on every connect |
+| `ha_discovery` | ✅ | 26 entities, entity_category grouping, stale entity cleanup |
+| `ota_manager` | ✅ | HTTP OTA via wrg2/ota/trigger |
+| `app_main` | ✅ | polling_task + control_task, publish interval gating |
 
-| Component | File | Status |
-|-----------|------|--------|
-| `system_core` | NVS flash init + task watchdog | ✅ |
-| `config_manager` | NVS namespace `wrg2_cfg`, hostname/WiFi/MQTT/Modbus config | ✅ |
-| `wifi_manager` | STA → AP fallback, mDNS `hostname.local`, AT country code, full TX power | ✅ |
-| `config_server` | HTTP portal port 80, hostname/WiFi/MQTT forms | ✅ |
-| `mqtt_manager` | MQTT client, LWT `wrg2/availability`, HA discovery on connect | ✅ |
-| `ha_discovery` | 6 HA entities published on MQTT connect | ✅ |
-| `ota_manager` | HTTP OTA via `wrg2/ota/trigger` MQTT topic | ✅ |
-| `app_main` | Mock polling task (21.5°C, 18°C, fan=2, bypass=OFF, mode=auto) | ✅ |
-
-**Provisioning flow:**
-1. Fresh device → AP `WRG2-Setup` (open, 192.168.4.1) appears immediately
-2. Connect + open `http://192.168.4.1/config` → set hostname, WiFi, MQTT
-3. Save WiFi → reboots into STA, connects, MQTT online, HA discovers entities
-4. Device reachable at `http://wrg2mqtt.local` (default hostname)
-
-**WiFi AP visibility fix (learned the hard way):**
-- `esp_wifi_set_country_code("AT", false)` — `false` = don't scan beacons for country, apply AT rules immediately → full TX power
-- `esp_wifi_set_max_tx_power(78)` after `esp_wifi_start()` — IDF 5.x defaults to "world safe" reduced power
-- mDNS requires `espressif/mdns` managed component (not built into IDF 5.4) → declared in `main/idf_component.yml`
-
-### 🔲 Phase 2 — Modbus Read
-
-**Pre-conditions (must do before coding):**
-1. Extract register map from `docs/Meltem BA-IA_M-WRG-II_P-M_E-M.pdf`
-   ```bash
-   pdftotext "docs/Meltem BA-IA_M-WRG-II_P-M_E-M.pdf" -
-   ```
-2. Confirm DE/RE GPIO — check `docs/XIAO_ESP32S3_Sense_Pinout.xlsx`, candidate GPIO2
-3. Console already moved to USB-JTAG (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`), so GPIO43/44 are free for UART_NUM_1
-
-**Components to create:**
-- `components/modbus_rtu/` — direct UART driver (not esp-modbus), FC03 read, CRC16, 3× retry, bus mutex
-- `components/wrg2_driver/` — register map, `wrg2_read_all()`, `wrg2_data_t` struct
-
-**Replace** mock `polling_task` in `app_main.c` with real `wrg2_read_all()` call.
-
-### 🔲 Phase 3 — Modbus Write / Full Control
-
-- FC06 write single register
-- MQTT control topics → `QueueHandle_t` → `control_task`
-- Read-after-write confirmation
+### Key behaviours
+- **Polling task**: reads Modbus every `poll_interval` seconds; publishes MQTT only when `pub_interval` seconds have elapsed. Control writes always trigger an immediate read-back publish.
+- **Control queue**: depth-8 FreeRTOS queue decouples MQTT event handler from Modbus task. `CMD_WRITE_REG` handles all config register writes generically.
+- **Watchdog**: polling_task subscribed to TWDT (60s). Modbus UART hang → panic-reset.
+- **Reboot**: via web UI button, MQTT `wrg2/control/reboot`, or HA button entity.
+- **WiFi AP fix**: `esp_wifi_set_country_code("AT", false)` + `esp_wifi_set_max_tx_power(78)` needed for full TX power in IDF 5.x.
 
 ---
 
@@ -109,32 +80,107 @@ Namespace: `wrg2_cfg`
 | `mqtt_user` | str | `` | |
 | `mqtt_pass` | str | `` | |
 | `mb_slave_id` | u8 | `1` | |
-| `mb_baud` | u32 | `9600` | |
-| `poll_ivl` | u32 | `10` | seconds |
+| `mb_baud` | u32 | `19200` | |
+| `poll_ivl` | u32 | `10` | Modbus read interval (seconds) |
+| `pub_ivl` | u32 | `30` | MQTT publish interval (seconds, ≥ poll_ivl) |
+
+---
+
+## Modbus Register Map
+
+**M-WRG-II uses literal PDU addresses** (not standard address-1 convention).
+Register map has gaps — burst reads across undefined addresses return exception 0x02.
+
+| Burst | Registers | Contents |
+|-------|-----------|----------|
+| A | 41000–41007 | Exhaust/outdoor/extract temps (Float32), extract humidity, CO2 |
+| B | 41009–41011 | Supply temp (Float32), supply humidity |
+| C | 41016–41018 | Error flag, filter due, frost active |
+| D | 41020–41021 | Actual fan throughputs (m³/h) |
+| E | 41027 | Filter days remaining |
+| F | 41030–41033 | Device and motor operating hours (UINT32) |
+| G | 41120–41122 | Operating mode, supply fan target, exhaust fan target |
+| H | 42000–42005 | Humidity/CO2 setpoints and fan range config |
+| I | 42007–42009 | External input fan level, on/off delay config |
+
+**Float/UINT32 word order:** BYTEORDER_LITTLE_SWAP — register N = low word, N+1 = high word.
+
+**Write sequences (FC06, commit reg 41132=0 always last):**
+- Off: 41120=1, 41132=0
+- Humidity: 41120=2, 41121=112, 41132=0
+- Balanced: 41120=3, 41121=m³/h×2, 41132=0
+- Unbalanced: 41120=4, 41121=supply×2, 41122=exhaust×2, 41132=0
+- Config: write single register (42000–42009), no commit needed
 
 ---
 
 ## MQTT Topics
 
-| Topic | Direction | Payload |
-|-------|-----------|---------|
-| `wrg2/availability` | pub | `online` / `offline` (LWT) |
-| `wrg2/status/temperature_supply` | pub | float string |
-| `wrg2/status/temperature_extract` | pub | float string |
-| `wrg2/status/fan_speed` | pub | int string |
-| `wrg2/status/bypass_state` | pub | `ON` / `OFF` |
-| `wrg2/status/operating_mode` | pub | `auto` / `manual` / `boost` / `away` |
-| `wrg2/control/fan_level/set` | sub | Phase 3 |
-| `wrg2/control/bypass/set` | sub | Phase 3 |
-| `wrg2/control/mode/set` | sub | Phase 3 |
-| `wrg2/ota/trigger` | sub | firmware URL |
+### Published (every pub_interval, retained)
+
+| Topic | Payload |
+|-------|---------|
+| `wrg2/availability` | `online` / `offline` (LWT) |
+| `wrg2/status/temperature_supply` | float °C |
+| `wrg2/status/temperature_extract` | float °C |
+| `wrg2/status/temperature_exhaust` | float °C |
+| `wrg2/status/temperature_outdoor` | float °C |
+| `wrg2/status/humidity_extract` | integer % |
+| `wrg2/status/humidity_supply` | integer % |
+| `wrg2/status/fan_supply_m3h` | integer m³/h |
+| `wrg2/status/fan_exhaust_m3h` | integer m³/h |
+| `wrg2/status/fan_supply_target` | integer m³/h |
+| `wrg2/status/fan_exhaust_target` | integer m³/h |
+| `wrg2/status/operating_mode` | `off`/`humidity`/`manual`/`manual_unbal` |
+| `wrg2/status/error` | `ON`/`OFF` |
+| `wrg2/status/filter_due` | `ON`/`OFF` |
+| `wrg2/status/frost_active` | `ON`/`OFF` |
+| `wrg2/status/filter_days_left` | integer days |
+| `wrg2/status/hours_device` | integer h |
+| `wrg2/status/hours_motors` | integer h |
+| `wrg2/config/hum_setpoint` | integer % |
+| `wrg2/config/hum_fan_min` | integer % |
+| `wrg2/config/hum_fan_max` | integer % |
+| `wrg2/config/ext_fan_level` | integer % |
+| `wrg2/config/ext_on_delay` | integer min |
+| `wrg2/config/ext_off_delay` | integer min |
+
+### Subscribed (control)
+
+| Topic | Effect |
+|-------|--------|
+| `wrg2/control/mode/set` | `"off"` or `"humidity"` |
+| `wrg2/control/fan_balanced/set` | integer 0–100 m³/h → mode 3 |
+| `wrg2/control/fan_unbal_supply/set` | integer 0–100 m³/h → mode 4 |
+| `wrg2/control/fan_unbal_exhaust/set` | integer 0–100 m³/h → mode 4 |
+| `wrg2/config/hum_setpoint/set` | write reg 42000 |
+| `wrg2/config/hum_fan_min/set` | write reg 42001 |
+| `wrg2/config/hum_fan_max/set` | write reg 42002 |
+| `wrg2/config/ext_fan_level/set` | write reg 42007 |
+| `wrg2/config/ext_on_delay/set` | write reg 42008 |
+| `wrg2/config/ext_off_delay/set` | write reg 42009 |
+| `wrg2/control/reboot` | esp_restart() after 200ms |
+| `wrg2/ota/trigger` | HTTP OTA firmware update |
+
+---
+
+## HA Discovery Entities (26 total)
+
+**Main card:** 4 temp sensors, extract/supply humidity, supply/exhaust fan speed, Switch Off button, Humidity Control button, Manual Balanced Fan number, Unbalanced Supply Fan number, Unbalanced Exhaust Fan number
+
+**Diagnostic section:** Operating Mode sensor, Error binary_sensor, Filter Due binary_sensor, Frost Protection binary_sensor, Filter Days Remaining sensor, Device Operating Hours sensor, Motor Operating Hours sensor, Reboot button
+
+**Configuration section:** Humidity Start Setpoint number (42000), Humidity Min Fan Level number (42001), Humidity Max Fan Level number (42002), Ext Input Fan Level number (42007), Ext Input On Delay number (42008), Ext Input Off Delay number (42009)
+
+Stale entities deleted on every connect: Phase 1 topics (wrg2_supply_temp, wrg2_extract_temp, wrg2_fan_speed, wrg2_bypass, wrg2_fan) + replaced Phase 3 topics (wrg2_mode select, wrg2_fan_level, wrg2_fan_exhaust_level).
 
 ---
 
 ## Key Design Decisions
 
-- **Direct UART Modbus** (not `esp-modbus`) — single slave, two function codes, ~250 lines, fully controllable
-- **UART_NUM_1** on GPIO43/44, `UART_MODE_RS485_HALF_DUPLEX` for automatic DE/RE via hardware RTS
+- **Direct UART Modbus** (not `esp-modbus`) — single slave, two function codes, fully controllable
+- **UART_MODE_UART** (not RS485_HALF_DUPLEX) — MAX485 module handles DE/RE automatically
 - **No credentials in source** — all secrets NVS-only, never logged
-- **Config portal always running** — available in both STA and AP mode on port 80
-- **MQTT reconnect** handles broker restarts — `ha_discovery_publish()` called on every `MQTT_EVENT_CONNECTED`
+- **Config portal always running** — port 80, both STA and AP mode
+- **MQTT reconnect** — `ha_discovery_publish()` called on every `MQTT_EVENT_CONNECTED`
+- **publish interval ≥ poll interval** — enforced in config_server POST handler
