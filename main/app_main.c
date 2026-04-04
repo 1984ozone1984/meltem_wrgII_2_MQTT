@@ -36,15 +36,23 @@ static void polling_task(void *arg)
         esp_task_wdt_reset();
 
         if (wrg2_read_all(&data) == ESP_OK) {
-            ESP_LOGI(TAG, "supply=%.1f°C extract=%.1f°C outdoor=%.1f°C exhaust=%.1f°C "
-                     "fan_s=%um³/h fan_e=%um³/h hum_ext=%u%% mode=%s%s%s",
+            ESP_LOGI(TAG, "[TEMP]   supply=%.1fC  extract=%.1fC  exhaust=%.1fC  outdoor=%.1fC",
                      data.temp_supply, data.temp_extract,
-                     data.temp_outdoor, data.temp_exhaust,
+                     data.temp_exhaust, data.temp_outdoor);
+            ESP_LOGI(TAG, "[FAN]    supply=%um3h  exhaust=%um3h  target=%u/%u(0-200)  mode=%s(%u)",
                      data.fan_supply_m3h, data.fan_exhaust_m3h,
-                     data.humidity_extract,
-                     mode_to_str(data.mode),
-                     data.error_flag  ? " ERROR"      : "",
-                     data.filter_due  ? " FILTER_DUE" : "");
+                     data.fan_target_supply, data.fan_target_exhaust,
+                     mode_to_str(data.mode), data.mode);
+            ESP_LOGI(TAG, "[AIR]    hum_extract=%u%%  hum_supply=%u%%  co2=%uppm",
+                     data.humidity_extract, data.humidity_supply, data.co2_extract);
+            ESP_LOGI(TAG, "[STATUS] error=%u  filter_due=%u  frost=%u  filter_days=%u  dev_h=%lu  mot_h=%lu",
+                     data.error_flag, data.filter_due, data.frost_active,
+                     data.filter_days_left,
+                     (unsigned long)data.hours_device, (unsigned long)data.hours_motors);
+            ESP_LOGI(TAG, "[CFG]    hum_sp=%u%%  fan=%u-%u%%  co2_sp=%uppm  fan=%u-%u%%  ext=%u%%  on=%umin  off=%umin",
+                     data.cfg_hum_setpoint, data.cfg_hum_fan_min, data.cfg_hum_fan_max,
+                     data.cfg_co2_setpoint, data.cfg_co2_fan_min, data.cfg_co2_fan_max,
+                     data.cfg_ext_fan_level, data.cfg_ext_on_delay, data.cfg_ext_off_delay);
 
             if (mqtt_manager_is_connected()) {
                 snprintf(buf, sizeof(buf), "%.1f", data.temp_supply);

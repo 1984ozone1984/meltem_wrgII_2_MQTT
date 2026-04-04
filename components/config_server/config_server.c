@@ -1,6 +1,7 @@
 #include "config_server.h"
 #include "config_manager.h"
 #include "wifi_manager.h"
+#include "wrg2_driver.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -8,6 +9,7 @@
 #include "freertos/task.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 static const char *TAG = "config_server";
 
@@ -17,8 +19,11 @@ static const char CSS[] =
     "body{font-family:sans-serif;margin:0;padding:16px;background:#f4f4f4;}"
     ".box{background:#fff;border-radius:8px;padding:20px;margin:14px 0;"
          "box-shadow:0 2px 6px rgba(0,0,0,.12);}"
+    ".grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}"
+    "@media(max-width:640px){.grid{grid-template-columns:1fr}}"
     "h1{margin:0 0 4px;font-size:1.4em;color:#222;}"
-    "h2{font-size:1.1em;color:#444;margin:0 0 12px;}"
+    "h2{font-size:1em;color:#555;margin:0 0 10px;text-transform:uppercase;"
+       "letter-spacing:.05em;border-bottom:2px solid #eee;padding-bottom:6px;}"
     "label{display:block;font-weight:bold;margin:10px 0 3px;color:#333;}"
     "input{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;"
           "box-sizing:border-box;font-size:1em;}"
@@ -29,10 +34,14 @@ static const char CSS[] =
     "nav a{display:inline-block;margin:0 8px 12px 0;padding:8px 14px;"
           "background:#1a73e8;color:#fff;text-decoration:none;border-radius:4px;}"
     "nav a:hover{background:#1558b0;}"
-    ".ok{color:#188038;} .err{color:#d93025;}"
+    ".ok{color:#188038;font-weight:bold;} .warn{color:#e8a000;font-weight:bold;}"
+    ".err{color:#d93025;font-weight:bold;}"
+    ".big{font-size:1.6em;font-weight:bold;color:#1a1a1a;}"
+    ".unit{font-size:.8em;color:#888;margin-left:2px;}"
     "table{width:100%;border-collapse:collapse;}"
-    "td,th{padding:6px 8px;text-align:left;border-bottom:1px solid #eee;}"
-    "th{background:#f8f8f8;}";
+    "td,th{padding:5px 8px;text-align:left;border-bottom:1px solid #f0f0f0;font-size:.95em;}"
+    "th{color:#888;font-weight:normal;width:60%;}"
+    ".refresh{font-size:.8em;color:#aaa;margin-left:8px;}";
 
 /* ── URL-decode ───────────────────────────────────────────────────────────── */
 
@@ -92,7 +101,24 @@ static void reboot_task(void *arg)
     esp_restart();
 }
 
-/* ── GET / ────────────────────────────────────────────────────────────────── */
+/* ── Mode description ─────────────────────────────────────────────────────── */
+
+static const char *mode_str(uint8_t mode, uint8_t fan_target)
+{
+    switch (mode) {
+        case 1: return "Off";
+        case 2:
+            if (fan_target == 16)  return "Automatic";
+            if (fan_target == 112) return "Humidity controlled";
+            if (fan_target == 144) return "CO2 controlled";
+            return "Regulated";
+        case 3: return "Manual (balanced)";
+        case 4: return "Manual (unbalanced)";
+        default: return "Unknown";
+    }
+}
+
+/* ── GET / — sensor dashboard ─────────────────────────────────────────────── */
 
 static esp_err_t root_get(httpd_req_t *req)
 {
@@ -100,35 +126,124 @@ static esp_err_t root_get(httpd_req_t *req)
     wifi_manager_get_ip(ip, sizeof(ip));
     bool ap = wifi_manager_is_ap_mode();
 
-    char *buf = malloc(4096);
+    wrg2_data_t d = {0};
+    bool have_data = wrg2_get_last_data(&d);
+
+    char *buf = malloc(6144);
     if (!buf) { httpd_resp_send_500(req); return ESP_FAIL; }
 
-    snprintf(buf, 4096,
+    int n = 0;
+    n += snprintf(buf + n, 6144 - n,
         "<!DOCTYPE html><html><head>"
-        "<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<meta charset=UTF-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<meta http-equiv=refresh content=10>"
         "<title>WRG2MQTT</title><style>%s</style></head><body>"
-        "<h1>WRG2MQTT</h1>"
-        "<nav><a href='/'>Status</a><a href='/config'>Settings</a></nav>"
-        "<div class=box><h2>Device Status</h2>"
-        "<table>"
-        "<tr><th>Mode</th><td>%s</td></tr>"
-        "<tr><th>IP</th><td>%s</td></tr>"
-        "<tr><th>WiFi SSID</th><td>%s</td></tr>"
-        "<tr><th>MQTT Broker</th><td>%s</td></tr>"
-        "</table></div>"
-        "%s"
-        "</body></html>",
-        CSS,
-        ap ? "Access Point (provisioning)" : "Station (connected)",
+        "<h1>M-WRG-II <span class=refresh>(auto-refresh 10s)</span></h1>"
+        "<nav><a href='/'>Status</a><a href='/config'>Settings</a></nav>",
+        CSS);
+
+    if (!have_data) {
+        n += snprintf(buf + n, 6144 - n,
+            "<div class=box><p>Waiting for first Modbus read...</p></div>");
+    } else {
+        /* ── Temperatures ── */
+        n += snprintf(buf + n, 6144 - n,
+            "<div class=grid>"
+            "<div class=box><h2>Temperatures</h2><table>"
+            "<tr><th>Supply (Zuluft)</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
+            "<tr><th>Extract (Abluft)</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
+            "<tr><th>Exhaust (Fortluft)</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
+            "<tr><th>Outdoor (Außenluft)</th><td><span class=big>%.1f</span><span class=unit>°C</span></td></tr>"
+            "</table></div>",
+            d.temp_supply, d.temp_extract, d.temp_exhaust, d.temp_outdoor);
+
+        /* ── Air quality ── */
+        n += snprintf(buf + n, 6144 - n,
+            "<div class=box><h2>Air Quality</h2><table>"
+            "<tr><th>Humidity extract</th><td><span class=big>%u</span><span class=unit>%%</span></td></tr>"
+            "<tr><th>Humidity supply</th><td><span class=big>%u</span><span class=unit>%%</span></td></tr>"
+            "<tr><th>CO2 extract</th><td><span class=big>%u</span><span class=unit>ppm</span></td></tr>"
+            "</table></div>",
+            d.humidity_extract, d.humidity_supply, d.co2_extract);
+
+        /* ── Fans & Mode ── */
+        n += snprintf(buf + n, 6144 - n,
+            "<div class=box><h2>Fans &amp; Mode</h2><table>"
+            "<tr><th>Mode</th><td><b>%s</b></td></tr>"
+            "<tr><th>Supply fan (actual)</th><td><span class=big>%u</span><span class=unit>m&#179;/h</span></td></tr>"
+            "<tr><th>Exhaust fan (actual)</th><td><span class=big>%u</span><span class=unit>m&#179;/h</span></td></tr>"
+            "<tr><th>Target supply (0-200)</th><td>%u &rarr; %u m&#179;/h</td></tr>"
+            "<tr><th>Target exhaust (0-200)</th><td>%u &rarr; %u m&#179;/h</td></tr>"
+            "</table></div>",
+            mode_str(d.mode, d.fan_target_supply),
+            d.fan_supply_m3h, d.fan_exhaust_m3h,
+            d.fan_target_supply,  d.fan_target_supply / 2,
+            d.fan_target_exhaust, d.fan_target_exhaust / 2);
+
+        /* ── Status & Maintenance ── */
+        n += snprintf(buf + n, 6144 - n,
+            "<div class=box><h2>Status &amp; Maintenance</h2><table>"
+            "<tr><th>Device status</th><td>%s</td></tr>"
+            "<tr><th>Frost protection</th><td>%s</td></tr>"
+            "<tr><th>Filter</th><td>%s</td></tr>"
+            "<tr><th>Days until filter change</th><td>%u</td></tr>"
+            "<tr><th>Device operating hours</th><td>%lu h</td></tr>"
+            "<tr><th>Motor operating hours</th><td>%lu h</td></tr>"
+            "</table></div>",
+            d.error_flag   ? "<span class=err>&#10007; ERROR</span>"
+                           : "<span class=ok>&#10003; OK</span>",
+            d.frost_active ? "<span class=warn>&#9744; Active</span>"
+                           : "<span class=ok>Inactive</span>",
+            d.filter_due   ? "<span class=warn>&#9888; Change needed</span>"
+                           : "<span class=ok>&#10003; OK</span>",
+            d.filter_days_left,
+            (unsigned long)d.hours_device,
+            (unsigned long)d.hours_motors);
+
+        /* ── Configuration (42xxx) ── */
+        n += snprintf(buf + n, 6144 - n,
+            "<div class=box><h2>Humidity Control Config</h2><table>"
+            "<tr><th>Start setpoint (42000)</th><td>%u%%</td></tr>"
+            "<tr><th>Min fan level (42001)</th><td>%u%%</td></tr>"
+            "<tr><th>Max fan level (42002)</th><td>%u%%</td></tr>"
+            "</table></div>"
+            "<div class=box><h2>CO2 Control Config</h2><table>"
+            "<tr><th>Start setpoint (42003)</th><td>%u ppm</td></tr>"
+            "<tr><th>Min fan level (42004)</th><td>%u%%</td></tr>"
+            "<tr><th>Max fan level (42005)</th><td>%u%%</td></tr>"
+            "</table></div>"
+            "<div class=box><h2>External Input Config</h2><table>"
+            "<tr><th>Fan level (42007)</th><td>%u%%</td></tr>"
+            "<tr><th>On-delay (42008)</th><td>%u min</td></tr>"
+            "<tr><th>Off-delay (42009)</th><td>%u min</td></tr>"
+            "</table></div>",
+            d.cfg_hum_setpoint, d.cfg_hum_fan_min, d.cfg_hum_fan_max,
+            d.cfg_co2_setpoint, d.cfg_co2_fan_min, d.cfg_co2_fan_max,
+            d.cfg_ext_fan_level, d.cfg_ext_on_delay, d.cfg_ext_off_delay);
+
+        n += snprintf(buf + n, 6144 - n, "</div>"); /* close .grid */
+    }
+
+    /* ── Network info ── */
+    n += snprintf(buf + n, 6144 - n,
+        "<div class=box><h2>Network</h2><table>"
+        "<tr><th>WiFi mode</th><td>%s</td></tr>"
+        "<tr><th>IP address</th><td>%s</td></tr>"
+        "<tr><th>MQTT broker</th><td>%s</td></tr>"
+        "</table></div>",
+        ap ? "Access Point (provisioning)" : "Station",
         ip,
-        g_config.wifi_ssid[0] ? g_config.wifi_ssid : "(not set)",
-        g_config.mqtt_url[0]  ? g_config.mqtt_url  : "(not set)",
-        ap ? "<div class=box style='border:2px solid #e8a000;'>"
-             "<h2>&#9888; Not connected to WiFi</h2>"
-             "<p>Connect to <strong>WRG2-Setup</strong> (open network) "
-             "then open <a href='http://192.168.4.1/config'>http://192.168.4.1/config</a> "
-             "to configure WiFi and MQTT credentials.</p></div>"
-           : "");
+        g_config.mqtt_url[0] ? g_config.mqtt_url : "<i>not configured</i>");
+
+    if (ap) {
+        n += snprintf(buf + n, 6144 - n,
+            "<div class=box style='border-left:4px solid #e8a000'>"
+            "<b>&#9888; Not connected to WiFi.</b> Open "
+            "<a href='/config'>/config</a> to set credentials.</div>");
+    }
+
+    n += snprintf(buf + n, 6144 - n, "</body></html>");
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);

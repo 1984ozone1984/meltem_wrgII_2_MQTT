@@ -1,69 +1,76 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 #include "esp_err.h"
 
 /**
- * Live sensor and status data read from the M-WRG-II via Modbus.
+ * All registers from Meltem M-WRG-II Modbus map (datasheet §16.5).
  *
- * Temperature fields map to Modbus Float32 registers (two consecutive
- * holding registers, word-swapped: r[1] is high word, r[0] is low word).
- * UINT8 fields are stored as the low byte of a 16-bit holding register.
- *
- * Air-path terminology:
- *   supply  (Zuluft)    — conditioned air delivered into the house
- *   extract (Abluft)    — stale air drawn from the house
- *   exhaust (Fortluft)  — extract air expelled to the outside
- *   outdoor (Außenluft) — fresh air drawn in from outside
+ * Floats: two consecutive holding registers, word-swapped
+ *   (r[1] is the high IEEE-754 word, r[0] is the low word).
+ * UINT8 fields occupy one 16-bit register, value in the low byte.
+ * Register addresses are LITERAL PDU values (41000 not 999).
  */
 typedef struct {
-    /* Temperatures (°C) */
-    float    temp_supply;         /* Zuluft     reg 41009-41010 */
-    float    temp_extract;        /* Abluft     reg 41004-41005 */
-    float    temp_exhaust;        /* Fortluft   reg 41000-41001 */
-    float    temp_outdoor;        /* Außenluft  reg 41002-41003 */
+    /* ── Temperatures (°C) ── */
+    float    temp_supply;         /* 41009-41010  Zuluft    (supply / inlet)  */
+    float    temp_extract;        /* 41004-41005  Abluft    (extract / room)  */
+    float    temp_exhaust;        /* 41000-41001  Fortluft  (exhaust / out)   */
+    float    temp_outdoor;        /* 41002-41003  Außenluft (outdoor / fresh) */
 
-    /* Humidity (%) */
-    uint16_t humidity_extract;    /* Feuchte Abluft  reg 41006 */
-    uint16_t humidity_supply;     /* Feuchte Zuluft  reg 41011 */
+    /* ── Humidity (%) ── */
+    uint16_t humidity_extract;    /* 41006  Feuchte Abluft */
+    uint16_t humidity_supply;     /* 41011  Feuchte Zuluft */
 
-    /* Air quality */
-    uint16_t co2_extract;         /* CO2 Abluft, ppm reg 41007 */
+    /* ── Air quality ── */
+    uint16_t co2_extract;         /* 41007  CO2 Abluft, ppm */
 
-    /* Status flags */
-    uint8_t  error_flag;          /* 0=OK, 1=error     reg 41016 */
-    uint8_t  filter_due;          /* 1=change needed   reg 41017 */
-    uint8_t  frost_active;        /* 1=frost protection reg 41018 */
+    /* ── Status flags ── */
+    uint8_t  error_flag;          /* 41016  0=OK, 1=error */
+    uint8_t  filter_due;          /* 41017  0=OK, 1=filter change needed */
+    uint8_t  frost_active;        /* 41018  0=inactive, 1=frost protection on */
 
-    /* Actual fan speeds (m³/h) */
-    uint8_t  fan_exhaust_m3h;     /* Lüftungsstufe Abluft  reg 41020 */
-    uint8_t  fan_supply_m3h;      /* Lüftungsstufe Zuluft  reg 41021 */
+    /* ── Actual fan throughputs (m³/h) ── */
+    uint8_t  fan_exhaust_m3h;     /* 41020  Lüftungsstufe Abluft */
+    uint8_t  fan_supply_m3h;      /* 41021  Lüftungsstufe Zuluft */
 
-    /* Maintenance */
-    uint16_t filter_days_left;    /* reg 41027 */
-    uint32_t hours_device;        /* reg 41030-41031 */
-    uint32_t hours_motors;        /* reg 41032-41033 */
+    /* ── Maintenance ── */
+    uint16_t filter_days_left;    /* 41027  days until filter change */
+    uint32_t hours_device;        /* 41030-41031  device operating hours */
+    uint32_t hours_motors;        /* 41032-41033  motor operating hours */
 
-    /* Operating mode (reg 41120) */
-    /*   1 = off           */
-    /*   2 = auto (humidity/CO2 regulation) */
-    /*   3 = balanced manual fan level      */
-    /*   4 = unbalanced manual fan level    */
+    /* ── Operating mode (41120) ──
+     *   1 = off
+     *   2 = regulated (sub-mode via fan_target: 16=auto, 112=humidity, 144=CO2)
+     *   3 = manual balanced
+     *   4 = manual unbalanced                                                */
     uint8_t  mode;
+    uint8_t  fan_target_supply;   /* 41121  0-200 → 0-100 m³/h */
+    uint8_t  fan_target_exhaust;  /* 41122  0-200 → 0-100 m³/h (unbalanced) */
 
-    /* Target fan levels, 0-200 (maps to 0-100 m³/h) */
-    uint8_t  fan_target_supply;   /* reg 41121 */
-    uint8_t  fan_target_exhaust;  /* reg 41122 */
+    /* ── Configuration registers (42xxx) ── */
+    uint8_t  cfg_hum_setpoint;    /* 42000  Rel. Feuchte Startpunkt  %  (40-80, def 60)  */
+    uint8_t  cfg_hum_fan_min;     /* 42001  Min. Lüftungsstufe Feuchte  %  (def 10)       */
+    uint8_t  cfg_hum_fan_max;     /* 42002  Max. Lüftungsstufe Feuchte  %  (def 60)       */
+    uint16_t cfg_co2_setpoint;    /* 42003  CO2 Startpunkt  ppm  (500-1200, def 800)      */
+    uint8_t  cfg_co2_fan_min;     /* 42004  Min. Lüftungsstufe CO2  %  (def 10)           */
+    uint8_t  cfg_co2_fan_max;     /* 42005  Max. Lüftungsstufe CO2  %  (def 60)           */
+    uint8_t  cfg_ext_fan_level;   /* 42007  Lüftungsstufe Ext. Eingang  %  (def 60)       */
+    uint8_t  cfg_ext_on_delay;    /* 42008  Einschaltverzögerung Ext.  min  (def 1)       */
+    uint8_t  cfg_ext_off_delay;   /* 42009  Nachlaufzeit Ext.  min  (def 15)              */
 } wrg2_data_t;
 
-/**
- * Initialize the Modbus RTU driver and configure UART.
- * Must be called before wrg2_read_all().
- */
+/** Initialize UART/Modbus driver. Must be called before wrg2_read_all(). */
 esp_err_t wrg2_driver_init(uint8_t slave_id, uint32_t baud);
 
 /**
- * Read all sensor and status data from the M-WRG-II.
- * Performs two Modbus burst reads. Each read retries up to 3 times.
- * Returns ESP_OK on success.
+ * Read all registers from the M-WRG-II (9 burst reads, retries 3× each).
+ * On success the result is also cached for wrg2_get_last_data().
  */
 esp_err_t wrg2_read_all(wrg2_data_t *data);
+
+/**
+ * Copy the last successfully read data into *out.
+ * Returns false if no successful read has happened yet.
+ */
+bool wrg2_get_last_data(wrg2_data_t *out);
