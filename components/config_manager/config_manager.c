@@ -107,7 +107,7 @@ apply_defaults:
         ESP_LOGD(TAG, "mb_slave_id defaulting to %u", g_config.mb_slave_id);
     }
     if (g_config.mb_baud == 0) {
-        g_config.mb_baud = 9600;
+        g_config.mb_baud = 19200;  /* M-WRG-II factory default (datasheet §16.1) */
         ESP_LOGD(TAG, "mb_baud defaulting to %lu", (unsigned long)g_config.mb_baud);
     }
     if (g_config.poll_interval == 0) {
