@@ -184,6 +184,15 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_hours_motors\"," DEV "}");
     pub("homeassistant/sensor/wrg2_hours_motors/config", buf);
 
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Reboot\","
+        "\"command_topic\":\"wrg2/control/reboot\","
+        "\"payload_press\":\"reboot\","
+        "\"device_class\":\"restart\","
+        DIAG
+        "\"unique_id\":\"wrg2_btn_reboot\"," DEV "}");
+    pub("homeassistant/button/wrg2_btn_reboot/config", buf);
+
     /* ════════════════════════════════════════════════════════════════════════
      * CONTROL  (main card)
      * ════════════════════════════════════════════════════════════════════════ */
@@ -302,5 +311,5 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_cfg_ext_off\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_ext_off/config", buf);
 
-    ESP_LOGI(TAG, "discovery: 8 deleted, 25 published");
+    ESP_LOGI(TAG, "discovery: 8 deleted, 26 published");
 }

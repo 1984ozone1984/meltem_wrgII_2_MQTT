@@ -27,7 +27,9 @@ Wiring:
 - **Sensor readout** — 4 temperatures, 2 humidity sensors, actual fan throughputs, error/filter/frost flags, operating hours, filter days remaining
 - **Full control** — Off, Humidity (auto) mode, balanced manual fan, unbalanced supply/exhaust fan independently
 - **Config writes** — humidity setpoint, fan range limits, external input delays writable from HA
-- **Home Assistant auto-discovery** — 25 entities grouped into sections (Temperatures, Air Quality, Status & Maintenance, Controls, Configuration); stale entities from previous firmware versions are cleaned up automatically
+- **Watchdog** — task watchdog (60 s timeout) monitors the polling loop and triggers a panic-reset if the Modbus UART hangs
+- **Remote reboot** — reboot button in HA and via MQTT topic `wrg2/control/reboot`
+- **Home Assistant auto-discovery** — 26 entities grouped into sections (Temperatures, Air Quality, Status & Maintenance, Controls, Configuration); stale entities from previous firmware versions are cleaned up automatically
 - **Web portal** — always-on HTTP status dashboard and control page at `http://<hostname>.local`
 - **OTA updates** — firmware update via MQTT trigger topic
 - **WiFi provisioning** — falls back to AP mode (`WRG2-Setup`) on first boot or failed STA connection
@@ -72,6 +74,7 @@ Entities are grouped on the HA device page by `entity_category`:
 | Filter Days Remaining | sensor (d) | `wrg2/status/filter_days_left` |
 | Device Operating Hours | sensor (h) | `wrg2/status/hours_device` |
 | Motor Operating Hours | sensor (h) | `wrg2/status/hours_motors` |
+| Reboot | button (restart) | `wrg2/control/reboot` |
 
 ### Humidity Control Config — Configuration section
 
@@ -137,6 +140,7 @@ Entities are grouped on the HA device page by `entity_category`:
 | `wrg2/config/ext_fan_level/set` | integer | write reg 42007 |
 | `wrg2/config/ext_on_delay/set` | integer | write reg 42008 |
 | `wrg2/config/ext_off_delay/set` | integer | write reg 42009 |
+| `wrg2/control/reboot` | any | reboot the device |
 | `wrg2/ota/trigger` | HTTP URL | trigger OTA firmware update |
 
 ---

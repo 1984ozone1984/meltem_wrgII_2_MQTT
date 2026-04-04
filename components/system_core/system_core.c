@@ -18,7 +18,7 @@ void system_core_init(void)
 
     /* Initialise task watchdog */
     esp_task_wdt_config_t wdt_cfg = {
-        .timeout_ms     = 30000,
+        .timeout_ms     = 60000,
         .idle_core_mask = 0,
         .trigger_panic  = true,
     };

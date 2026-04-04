@@ -4,6 +4,9 @@
 #include "config_manager.h"
 #include "mqtt_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 #include <stdbool.h>
 
@@ -18,6 +21,7 @@ static volatile bool            s_connected = false;
 #define TOPIC_FAN_UNBAL_SUPPLY    "wrg2/control/fan_unbal_supply/set"  /* 0-100 → mode=4 */
 #define TOPIC_FAN_UNBAL_EXHAUST   "wrg2/control/fan_unbal_exhaust/set" /* 0-100 → mode=4 */
 #define TOPIC_OTA                 "wrg2/ota/trigger"
+#define TOPIC_REBOOT              "wrg2/control/reboot"
 
 /* Config write topics */
 #define TOPIC_CFG_HUM_SETPOINT    "wrg2/config/hum_setpoint/set"   /* 42000 */
@@ -57,6 +61,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         esp_mqtt_client_subscribe(s_client, TOPIC_FAN_UNBAL_SUPPLY,  1);
         esp_mqtt_client_subscribe(s_client, TOPIC_FAN_UNBAL_EXHAUST, 1);
         esp_mqtt_client_subscribe(s_client, TOPIC_OTA,               1);
+        esp_mqtt_client_subscribe(s_client, TOPIC_REBOOT,            1);
         esp_mqtt_client_subscribe(s_client, TOPIC_CFG_HUM_SETPOINT,  1);
         esp_mqtt_client_subscribe(s_client, TOPIC_CFG_HUM_FAN_MIN,   1);
         esp_mqtt_client_subscribe(s_client, TOPIC_CFG_HUM_FAN_MAX,   1);
@@ -88,7 +93,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
 
         ESP_LOGD(TAG, "DATA topic=%s payload=%s", topic, payload);
 
-        if (strcmp(topic, TOPIC_OTA) == 0) {
+        if (strcmp(topic, TOPIC_REBOOT) == 0) {
+            ESP_LOGW(TAG, "reboot requested via MQTT");
+            vTaskDelay(pdMS_TO_TICKS(200)); /* let ACK go out */
+            esp_restart();
+        } else if (strcmp(topic, TOPIC_OTA) == 0) {
             ESP_LOGI(TAG, "OTA trigger: %s", payload);
             ota_manager_handle_trigger(payload);
         } else if (strcmp(topic, TOPIC_MODE_SET) == 0) {
