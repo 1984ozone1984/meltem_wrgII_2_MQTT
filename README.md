@@ -26,8 +26,9 @@ Wiring:
 
 - **Sensor readout** — 4 temperatures, 2 humidity sensors, actual fan throughputs, error/filter/frost flags, operating hours, filter days remaining
 - **Full control** — Off, Humidity (auto) mode, balanced manual fan, unbalanced supply/exhaust fan independently
-- **Home Assistant auto-discovery** — entities appear automatically on MQTT connect; stale entities from previous firmware versions are cleaned up
-- **Web portal** — always-on HTTP config and control page at `http://<hostname>.local`
+- **Config writes** — humidity setpoint, fan range limits, external input delays writable from HA
+- **Home Assistant auto-discovery** — 25 entities grouped into sections (Temperatures, Air Quality, Status & Maintenance, Controls, Configuration); stale entities from previous firmware versions are cleaned up automatically
+- **Web portal** — always-on HTTP status dashboard and control page at `http://<hostname>.local`
 - **OTA updates** — firmware update via MQTT trigger topic
 - **WiFi provisioning** — falls back to AP mode (`WRG2-Setup`) on first boot or failed STA connection
 
@@ -35,39 +36,108 @@ Wiring:
 
 ## Home Assistant Entities
 
+Entities are grouped on the HA device page by `entity_category`:
+
+### Temperatures & Air Quality — main card
+
 | Entity | Type | Topic |
 |--------|------|-------|
-| Supply Air Temperature | sensor | `wrg2/status/temperature_supply` |
-| Extract Air Temperature | sensor | `wrg2/status/temperature_extract` |
-| Exhaust Air Temperature | sensor | `wrg2/status/temperature_exhaust` |
-| Outdoor Air Temperature | sensor | `wrg2/status/temperature_outdoor` |
-| Extract Air Humidity | sensor | `wrg2/status/humidity_extract` |
-| Supply Air Humidity | sensor | `wrg2/status/humidity_supply` |
+| Supply Air Temperature | sensor (°C) | `wrg2/status/temperature_supply` |
+| Extract Air Temperature | sensor (°C) | `wrg2/status/temperature_extract` |
+| Exhaust Air Temperature | sensor (°C) | `wrg2/status/temperature_exhaust` |
+| Outdoor Air Temperature | sensor (°C) | `wrg2/status/temperature_outdoor` |
+| Extract Air Humidity | sensor (%) | `wrg2/status/humidity_extract` |
+| Supply Air Humidity | sensor (%) | `wrg2/status/humidity_supply` |
 | Supply Fan Speed | sensor (m³/h) | `wrg2/status/fan_supply_m3h` |
 | Exhaust Fan Speed | sensor (m³/h) | `wrg2/status/fan_exhaust_m3h` |
-| Error | binary_sensor | `wrg2/status/error` |
-| Filter Due | binary_sensor | `wrg2/status/filter_due` |
-| Frost Protection | binary_sensor | `wrg2/status/frost_active` |
-| Operating Mode | sensor | `wrg2/status/operating_mode` |
+
+### Controls — main card
+
+| Entity | Type | Topic |
+|--------|------|-------|
 | Switch Off | button | `wrg2/control/mode/set` → `"off"` |
 | Humidity Control | button | `wrg2/control/mode/set` → `"humidity"` |
-| Manual Balanced Fan | number (0–100 m³/h) | `wrg2/control/fan_balanced/set` |
-| Unbalanced Supply Fan | number (0–100 m³/h) | `wrg2/control/fan_unbal_supply/set` |
-| Unbalanced Exhaust Fan | number (0–100 m³/h) | `wrg2/control/fan_unbal_exhaust/set` |
+| Manual Balanced Fan | number (0–100 m³/h, step 5) | `wrg2/control/fan_balanced/set` |
+| Unbalanced Supply Fan | number (0–100 m³/h, step 5) | `wrg2/control/fan_unbal_supply/set` |
+| Unbalanced Exhaust Fan | number (0–100 m³/h, step 5) | `wrg2/control/fan_unbal_exhaust/set` |
+
+### Status & Maintenance — Diagnostic section
+
+| Entity | Type | Topic |
+|--------|------|-------|
+| Operating Mode | sensor | `wrg2/status/operating_mode` |
+| Error | binary_sensor (problem) | `wrg2/status/error` |
+| Filter Due | binary_sensor (problem) | `wrg2/status/filter_due` |
+| Frost Protection | binary_sensor (cold) | `wrg2/status/frost_active` |
+| Filter Days Remaining | sensor (d) | `wrg2/status/filter_days_left` |
+| Device Operating Hours | sensor (h) | `wrg2/status/hours_device` |
+| Motor Operating Hours | sensor (h) | `wrg2/status/hours_motors` |
+
+### Humidity Control Config — Configuration section
+
+| Entity | Type | Register | Topic |
+|--------|------|----------|-------|
+| Humidity Start Setpoint | number (40–80%) | 42000 | `wrg2/config/hum_setpoint/set` |
+| Humidity Min Fan Level | number (0–100%) | 42001 | `wrg2/config/hum_fan_min/set` |
+| Humidity Max Fan Level | number (0–100%) | 42002 | `wrg2/config/hum_fan_max/set` |
+
+### External Input Config — Configuration section
+
+| Entity | Type | Register | Topic |
+|--------|------|----------|-------|
+| Ext Input Fan Level | number (0–100%) | 42007 | `wrg2/config/ext_fan_level/set` |
+| Ext Input On Delay | number (0–60 min) | 42008 | `wrg2/config/ext_on_delay/set` |
+| Ext Input Off Delay | number (0–120 min) | 42009 | `wrg2/config/ext_off_delay/set` |
 
 ---
 
 ## MQTT Topics
 
-| Topic | Direction | Notes |
-|-------|-----------|-------|
-| `wrg2/availability` | pub | `online` / `offline` (LWT) |
-| `wrg2/status/*` | pub | All sensor values, published every poll interval |
-| `wrg2/control/mode/set` | sub | `"off"` or `"humidity"` |
-| `wrg2/control/fan_balanced/set` | sub | Integer 0–100 m³/h → balanced mode (reg 41120=3) |
-| `wrg2/control/fan_unbal_supply/set` | sub | Integer 0–100 m³/h → unbalanced mode (reg 41120=4), exhaust preserved |
-| `wrg2/control/fan_unbal_exhaust/set` | sub | Integer 0–100 m³/h → unbalanced mode (reg 41120=4), supply preserved |
-| `wrg2/ota/trigger` | sub | HTTP URL of firmware `.bin` for OTA update |
+### Status (published every poll interval, retained)
+
+| Topic | Payload |
+|-------|---------|
+| `wrg2/availability` | `online` / `offline` (LWT) |
+| `wrg2/status/temperature_supply` | float (°C) |
+| `wrg2/status/temperature_extract` | float (°C) |
+| `wrg2/status/temperature_exhaust` | float (°C) |
+| `wrg2/status/temperature_outdoor` | float (°C) |
+| `wrg2/status/humidity_extract` | integer (%) |
+| `wrg2/status/humidity_supply` | integer (%) |
+| `wrg2/status/fan_supply_m3h` | integer (m³/h) |
+| `wrg2/status/fan_exhaust_m3h` | integer (m³/h) |
+| `wrg2/status/fan_supply_target` | integer (m³/h) |
+| `wrg2/status/fan_exhaust_target` | integer (m³/h) |
+| `wrg2/status/operating_mode` | `off` / `humidity` / `manual` / `manual_unbal` |
+| `wrg2/status/error` | `ON` / `OFF` |
+| `wrg2/status/filter_due` | `ON` / `OFF` |
+| `wrg2/status/frost_active` | `ON` / `OFF` |
+| `wrg2/status/filter_days_left` | integer (days) |
+| `wrg2/status/hours_device` | integer (h) |
+| `wrg2/status/hours_motors` | integer (h) |
+| `wrg2/config/hum_setpoint` | integer (%) |
+| `wrg2/config/hum_fan_min` | integer (%) |
+| `wrg2/config/hum_fan_max` | integer (%) |
+| `wrg2/config/ext_fan_level` | integer (%) |
+| `wrg2/config/ext_on_delay` | integer (min) |
+| `wrg2/config/ext_off_delay` | integer (min) |
+
+### Control (subscribe)
+
+| Topic | Payload | Effect |
+|-------|---------|--------|
+| `wrg2/control/mode/set` | `"off"` | reg 41120=1, 41132=0 |
+| `wrg2/control/mode/set` | `"humidity"` | reg 41120=2, 41121=112, 41132=0 |
+| `wrg2/control/fan_balanced/set` | integer 0–100 | reg 41120=3, 41121=val×2, 41132=0 |
+| `wrg2/control/fan_unbal_supply/set` | integer 0–100 | reg 41120=4, 41121=val×2, 41122=cached, 41132=0 |
+| `wrg2/control/fan_unbal_exhaust/set` | integer 0–100 | reg 41120=4, 41121=cached, 41122=val×2, 41132=0 |
+| `wrg2/config/hum_setpoint/set` | integer | write reg 42000 |
+| `wrg2/config/hum_fan_min/set` | integer | write reg 42001 |
+| `wrg2/config/hum_fan_max/set` | integer | write reg 42002 |
+| `wrg2/config/ext_fan_level/set` | integer | write reg 42007 |
+| `wrg2/config/ext_on_delay/set` | integer | write reg 42008 |
+| `wrg2/config/ext_off_delay/set` | integer | write reg 42009 |
+| `wrg2/ota/trigger` | HTTP URL | trigger OTA firmware update |
 
 ---
 
@@ -146,14 +216,9 @@ The firmware reads the following Modbus holding registers (FC03) using the devic
 | H | 42000–42005 | Humidity and CO2 setpoints and fan range config |
 | I | 42007–42009 | External input fan level, on/off delay config |
 
-Write sequence (FC06):
+The register map has gaps (41008, 41012–41015, 41019, 41022–41026, 41028–41029, 41034–41119, 42006) — burst reads spanning undefined addresses return Modbus exception 0x02. Each burst covers only contiguous valid registers.
 
-- **Off**: 41120=1, 41132=0
-- **Humidity (regulated)**: 41120=2, 41121=112, 41132=0
-- **Balanced manual**: 41120=3, 41121=m³/h×2, 41132=0
-- **Unbalanced manual**: 41120=4, 41121=supply×2, 41122=exhaust×2, 41132=0
-
-Floats use little-endian word order (BYTEORDER_LITTLE_SWAP): register N is the low word, register N+1 is the high word.
+Floats use little-endian word order (BYTEORDER_LITTLE_SWAP): register N is the low word, register N+1 is the high word. UINT32 operating hours use the same word order.
 
 ---
 
@@ -161,4 +226,4 @@ Floats use little-endian word order (BYTEORDER_LITTLE_SWAP): register N is the l
 
 **P-M-F / E-M-F variants** (humidity-controlled, no CO2 sensor):
 - CO2 register returns `0x7FFF` — firmware treats this as "no sensor" and skips publishing the CO2 topic
-- Mode 2 = humidity-regulated (no "automatic" mode available on this variant)
+- Mode 2 = humidity-regulated (no "automatic" mode on this variant)
