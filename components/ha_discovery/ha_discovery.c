@@ -25,34 +25,10 @@ static void pub(const char *topic, const char *payload)
     mqtt_publish(topic, payload, 1, 1);
 }
 
-/* Publish empty retained payload → HA removes the entity */
-static void del(const char *topic)
-{
-    mqtt_publish(topic, "", 1, 1);
-}
 
 void ha_discovery_publish(void)
 {
     char buf[700];
-
-    /* ── Delete stale entities from previous firmware versions ──────────── */
-    /* Phase 1 entities (wrong unique_id paths or replaced) */
-    del("homeassistant/sensor/wrg2_supply_temp/config");
-    del("homeassistant/sensor/wrg2_extract_temp/config");
-    del("homeassistant/sensor/wrg2_fan_speed/config");
-    del("homeassistant/binary_sensor/wrg2_bypass/config");
-    del("homeassistant/fan/wrg2_fan/config");
-    /* Phase 3 control entities replaced by buttons + separate numbers */
-    del("homeassistant/select/wrg2_mode/config");
-    del("homeassistant/number/wrg2_fan_level/config");
-    del("homeassistant/number/wrg2_fan_exhaust_level/config");
-    /* Phase 4 temp/humidity entities renamed to German register names */
-    del("homeassistant/sensor/wrg2_temp_supply/config");
-    del("homeassistant/sensor/wrg2_temp_extract/config");
-    del("homeassistant/sensor/wrg2_temp_exhaust/config");
-    del("homeassistant/sensor/wrg2_temp_outdoor/config");
-    del("homeassistant/sensor/wrg2_hum_extract/config");
-    del("homeassistant/sensor/wrg2_hum_supply/config");
 
     /* ════════════════════════════════════════════════════════════════════════
      * TEMPERATURES  (main card)
