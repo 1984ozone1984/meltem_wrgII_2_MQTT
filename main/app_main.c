@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 static const char *TAG = "app_main";
 
@@ -133,12 +134,42 @@ static void publish_status(const wrg2_data_t *d)
 #undef PUB
 }
 
+/* ── Change detection ──────────────────────────────────────────────────── */
+
+static bool data_changed(const wrg2_data_t *a, const wrg2_data_t *b)
+{
+    if (fabsf(a->temp_zuluft     - b->temp_zuluft)     >= 0.1f) return true;
+    if (fabsf(a->temp_abluft     - b->temp_abluft)     >= 0.1f) return true;
+    if (fabsf(a->temp_fortluft   - b->temp_fortluft)   >= 0.1f) return true;
+    if (fabsf(a->temp_aussenluft - b->temp_aussenluft) >= 0.1f) return true;
+    if (a->feuchte_abluft    != b->feuchte_abluft)    return true;
+    if (a->feuchte_zuluft    != b->feuchte_zuluft)    return true;
+    if (a->fan_supply_m3h    != b->fan_supply_m3h)    return true;
+    if (a->fan_exhaust_m3h   != b->fan_exhaust_m3h)   return true;
+    if (a->fan_target_supply != b->fan_target_supply) return true;
+    if (a->fan_target_exhaust!= b->fan_target_exhaust)return true;
+    if (a->mode              != b->mode)              return true;
+    if (a->error_flag        != b->error_flag)        return true;
+    if (a->filter_due        != b->filter_due)        return true;
+    if (a->frost_active      != b->frost_active)      return true;
+    if (a->filter_days_left  != b->filter_days_left)  return true;
+    if (a->cfg_hum_setpoint  != b->cfg_hum_setpoint)  return true;
+    if (a->cfg_hum_fan_min   != b->cfg_hum_fan_min)   return true;
+    if (a->cfg_hum_fan_max   != b->cfg_hum_fan_max)   return true;
+    if (a->cfg_ext_fan_level != b->cfg_ext_fan_level) return true;
+    if (a->cfg_ext_on_delay  != b->cfg_ext_on_delay)  return true;
+    if (a->cfg_ext_off_delay != b->cfg_ext_off_delay) return true;
+    return false;
+}
+
 /* ── Polling task ──────────────────────────────────────────────────────── */
 
 static void polling_task(void *arg)
 {
     wrg2_data_t data;
-    uint32_t    secs_since_pub = 0;  /* counts up by poll_interval each loop */
+    wrg2_data_t last_pub  = {0};
+    bool        pub_valid = false;   /* true once we have published at least once */
+    uint32_t    secs_since_pub = 0;
 
     esp_task_wdt_add(NULL);
     while (1) {
@@ -169,9 +200,17 @@ static void polling_task(void *arg)
                      data.cfg_ext_fan_level, data.cfg_ext_on_delay, data.cfg_ext_off_delay);
 
             secs_since_pub += g_config.poll_interval;
-            if (mqtt_manager_is_connected() &&
-                secs_since_pub >= g_config.pub_interval) {
+
+            bool interval_due = secs_since_pub >= g_config.pub_interval;
+            bool changed      = pub_valid && data_changed(&data, &last_pub);
+
+            if (mqtt_manager_is_connected() && (!pub_valid || interval_due || changed)) {
+                if (changed && !interval_due) {
+                    ESP_LOGI(TAG, "value changed — publishing immediately");
+                }
                 publish_status(&data);
+                last_pub  = data;
+                pub_valid = true;
                 secs_since_pub = 0;
                 if (data.error_flag) ESP_LOGW(TAG, "Device reports error — check unit");
                 if (data.filter_due) ESP_LOGW(TAG, "Filter change due");
@@ -262,7 +301,9 @@ void app_main(void)
     wifi_manager_start();
     config_server_start();
 
-    if (wrg2_driver_init(g_config.mb_slave_id, g_config.mb_baud) != ESP_OK) {
+    if (wrg2_driver_init(g_config.mb_slave_id, g_config.mb_baud,
+                         g_config.mb_gpio_tx, g_config.mb_gpio_rx,
+                         g_config.mb_gpio_rts) != ESP_OK) {
         ESP_LOGE(TAG, "Modbus RTU init failed");
     }
 

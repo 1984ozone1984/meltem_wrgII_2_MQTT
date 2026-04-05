@@ -5,6 +5,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -142,7 +143,7 @@ static esp_err_t root_get(httpd_req_t *req)
         "<title>WRG2MQTT</title><style>%s</style></head><body>"
         "<h1>M-WRG-II <span class=refresh>(auto-refresh 10s)</span></h1>"
         "<nav><a href='/'>Status</a><a href='/control'>Control</a>"
-        "<a href='/config'>Settings</a></nav>",
+        "<a href='/config'>Settings</a><a href='/ota'>OTA Update</a></nav>",
         CSS);
 
     if (!have_data) {
@@ -278,7 +279,7 @@ static esp_err_t control_get(httpd_req_t *req)
         "<title>WRG2MQTT Control</title><style>%s</style></head><body>"
         "<h1>M-WRG-II Control</h1>"
         "<nav><a href='/'>Status</a><a href='/control'>Control</a>"
-        "<a href='/config'>Settings</a></nav>",
+        "<a href='/config'>Settings</a><a href='/ota'>OTA Update</a></nav>",
         CSS);
 
     if (!have) {
@@ -492,15 +493,16 @@ static esp_err_t ctrl_cfg_ext_post(httpd_req_t *req)
 
 static esp_err_t config_get(httpd_req_t *req)
 {
-    char *buf = malloc(4096);
+    char *buf = malloc(5120);
     if (!buf) { httpd_resp_send_500(req); return ESP_FAIL; }
 
-    snprintf(buf, 4096,
+    snprintf(buf, 5120,
         "<!DOCTYPE html><html><head>"
         "<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         "<title>WRG2MQTT Settings</title><style>%s</style></head><body>"
         "<h1>WRG2MQTT Settings</h1>"
-        "<nav><a href='/'>Status</a><a href='/config'>Settings</a></nav>"
+        "<nav><a href='/'>Status</a><a href='/control'>Control</a>"
+        "<a href='/config'>Settings</a><a href='/ota'>OTA Update</a></nav>"
 
         "<div class=box><h2>Device</h2>"
         "<form method=POST action=/config/hostname>"
@@ -543,6 +545,14 @@ static esp_err_t config_get(httpd_req_t *req)
         "<input type=number name=pub_ivl value='%lu' min=1 max=3600>"
         "<p style='color:#888;font-size:.9em'>Publish interval should be &ge; poll interval. "
         "Takes effect immediately (no reboot needed).</p>"
+        "<label>TX GPIO</label>"
+        "<input type=number name=gpio_tx value='%u' min=0 max=47>"
+        "<label>RX GPIO</label>"
+        "<input type=number name=gpio_rx value='%u' min=0 max=47>"
+        "<label>RTS/DE GPIO (set to 255 to disable)</label>"
+        "<input type=number name=gpio_rts value='%u' min=0 max=255>"
+        "<p style='color:#888;font-size:.9em'>GPIO changes take effect after reboot. "
+        "Default: TX=43, RX=44, RTS=2.</p>"
         "<button type=submit>Save Modbus &amp; Polling</button>"
         "</form></div>"
 
@@ -560,7 +570,10 @@ static esp_err_t config_get(httpd_req_t *req)
         (unsigned)g_config.mb_slave_id,
         (unsigned long)g_config.mb_baud,
         (unsigned long)g_config.poll_interval,
-        (unsigned long)g_config.pub_interval);
+        (unsigned long)g_config.pub_interval,
+        (unsigned)g_config.mb_gpio_tx,
+        (unsigned)g_config.mb_gpio_rx,
+        (unsigned)g_config.mb_gpio_rts);
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
@@ -662,15 +675,22 @@ static esp_err_t config_modbus_post(httpd_req_t *req)
     read_body(req, body, sizeof(body));
 
     char s_slave[8] = {0}, s_baud[8] = {0}, s_poll[8] = {0}, s_pub[8] = {0};
+    char s_tx[8] = {0}, s_rx[8] = {0}, s_rts[8] = {0};
     get_field(body, "slave_id", s_slave, sizeof(s_slave));
     get_field(body, "baud",     s_baud,  sizeof(s_baud));
     get_field(body, "poll_ivl", s_poll,  sizeof(s_poll));
     get_field(body, "pub_ivl",  s_pub,   sizeof(s_pub));
+    get_field(body, "gpio_tx",  s_tx,    sizeof(s_tx));
+    get_field(body, "gpio_rx",  s_rx,    sizeof(s_rx));
+    get_field(body, "gpio_rts", s_rts,   sizeof(s_rts));
 
-    uint8_t  slave_id     = (uint8_t)atoi(s_slave);
-    uint32_t baud         = (uint32_t)atoi(s_baud);
+    uint8_t  slave_id      = (uint8_t)atoi(s_slave);
+    uint32_t baud          = (uint32_t)atoi(s_baud);
     uint32_t poll_interval = (uint32_t)atoi(s_poll);
     uint32_t pub_interval  = (uint32_t)atoi(s_pub);
+    uint8_t  gpio_tx       = s_tx[0]  ? (uint8_t)atoi(s_tx)  : g_config.mb_gpio_tx;
+    uint8_t  gpio_rx       = s_rx[0]  ? (uint8_t)atoi(s_rx)  : g_config.mb_gpio_rx;
+    uint8_t  gpio_rts      = s_rts[0] ? (uint8_t)atoi(s_rts) : g_config.mb_gpio_rts;
 
     /* Clamp to sane ranges */
     if (slave_id < 1)            slave_id = 1;
@@ -682,19 +702,217 @@ static esp_err_t config_modbus_post(httpd_req_t *req)
     if (pub_interval < 1)        pub_interval = 1;
     if (pub_interval > 3600)     pub_interval = 3600;
     if (pub_interval < poll_interval) pub_interval = poll_interval;
+    /* gpio_tx/rx clamped to valid ESP32-S3 range */
+    if (gpio_tx > 47)  gpio_tx  = 47;
+    if (gpio_rx > 47)  gpio_rx  = 47;
+    /* gpio_rts: 255 means disabled (UART_PIN_NO_CHANGE) */
 
-    config_manager_save_modbus(slave_id, baud, poll_interval, pub_interval);
+    bool gpio_changed = (gpio_tx  != g_config.mb_gpio_tx  ||
+                         gpio_rx  != g_config.mb_gpio_rx  ||
+                         gpio_rts != g_config.mb_gpio_rts);
 
-    const char *resp =
-        "<!DOCTYPE html><html><head><meta charset=UTF-8>"
-        "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>Saved</title></head><body style='font-family:sans-serif;padding:20px'>"
-        "<h2>&#10003; Modbus &amp; Polling settings saved</h2>"
-        "<p>New intervals take effect immediately.</p>"
-        "<p><a href='/config'>Back to settings</a></p>"
-        "</body></html>";
+    config_manager_save_modbus(slave_id, baud, poll_interval, pub_interval,
+                               gpio_tx, gpio_rx, gpio_rts);
+
+    const char *resp = gpio_changed
+        ? "<!DOCTYPE html><html><head><meta charset=UTF-8>"
+          "<meta name=viewport content='width=device-width,initial-scale=1'>"
+          "<title>Saved</title></head><body style='font-family:sans-serif;padding:20px'>"
+          "<h2>&#10003; Modbus &amp; Polling settings saved</h2>"
+          "<p>GPIO pin changes take effect after reboot.</p>"
+          "<p><a href='/config'>Back to settings</a></p>"
+          "</body></html>"
+        : "<!DOCTYPE html><html><head><meta charset=UTF-8>"
+          "<meta name=viewport content='width=device-width,initial-scale=1'>"
+          "<title>Saved</title></head><body style='font-family:sans-serif;padding:20px'>"
+          "<h2>&#10003; Modbus &amp; Polling settings saved</h2>"
+          "<p>New intervals take effect immediately.</p>"
+          "<p><a href='/config'>Back to settings</a></p>"
+          "</body></html>";
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+/* ── GET /ota ─────────────────────────────────────────────────────────────── */
+
+static esp_err_t ota_get(httpd_req_t *req)
+{
+    /* Inline the JS so there are no external dependencies */
+    static const char PAGE[] =
+        "<!DOCTYPE html><html><head>"
+        "<meta charset=UTF-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>WRG2MQTT OTA Update</title>"
+        "<style>"
+        "body{font-family:sans-serif;margin:0;padding:16px;background:#f4f4f4;}"
+        ".box{background:#fff;border-radius:8px;padding:20px;margin:14px 0;"
+             "box-shadow:0 2px 6px rgba(0,0,0,.12);}"
+        "h1{margin:0 0 4px;font-size:1.4em;color:#222;}"
+        "h2{font-size:1em;color:#555;margin:0 0 10px;text-transform:uppercase;"
+           "letter-spacing:.05em;border-bottom:2px solid #eee;padding-bottom:6px;}"
+        "label{display:block;font-weight:bold;margin:10px 0 3px;color:#333;}"
+        "input[type=file]{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;"
+                         "box-sizing:border-box;font-size:1em;background:#fff;}"
+        "button{background:#1a73e8;color:#fff;padding:10px 20px;border:none;"
+                "border-radius:4px;cursor:pointer;font-size:1em;margin-top:14px;}"
+        "button:hover{background:#1558b0;}"
+        "button:disabled{background:#aaa;cursor:default;}"
+        "nav a{display:inline-block;margin:0 8px 12px 0;padding:8px 14px;"
+              "background:#1a73e8;color:#fff;text-decoration:none;border-radius:4px;}"
+        "nav a:hover{background:#1558b0;}"
+        "progress{width:100%;height:20px;margin-top:12px;}"
+        "#status{margin-top:8px;font-weight:bold;}"
+        ".ok{color:#188038;} .err{color:#d93025;} .info{color:#555;}"
+        "</style></head><body>"
+        "<h1>WRG2MQTT OTA Update</h1>"
+        "<nav><a href='/'>Status</a><a href='/control'>Control</a>"
+        "<a href='/config'>Settings</a><a href='/ota'>OTA Update</a></nav>"
+        "<div class=box><h2>Flash Firmware</h2>"
+        "<p class=info>Select a <code>.bin</code> firmware file built for this device. "
+        "The device will reboot automatically after a successful flash.</p>"
+        "<label>Firmware file</label>"
+        "<input type=file id=fw accept=.bin>"
+        "<button id=btn onclick=doUpload()>Flash Firmware</button>"
+        "<progress id=bar value=0 max=100 style='display:none'></progress>"
+        "<div id=status></div>"
+        "</div>"
+        "<script>"
+        "function doUpload(){"
+          "var f=document.getElementById('fw').files[0];"
+          "if(!f){alert('No file selected');return;}"
+          "var btn=document.getElementById('btn');"
+          "var bar=document.getElementById('bar');"
+          "var st=document.getElementById('status');"
+          "btn.disabled=true;"
+          "bar.style.display='';"
+          "bar.value=0;"
+          "st.textContent='Uploading...';"
+          "st.className='info';"
+          "var xhr=new XMLHttpRequest();"
+          "xhr.open('POST','/ota/upload');"
+          "xhr.setRequestHeader('Content-Type','application/octet-stream');"
+          "xhr.upload.onprogress=function(e){"
+            "if(e.lengthComputable){"
+              "var p=Math.round(e.loaded/e.total*100);"
+              "bar.value=p;"
+              "st.textContent='Uploading... '+p+'% ('+Math.round(e.loaded/1024)+'/'+"
+                "Math.round(e.total/1024)+' KB)';"
+            "}"
+          "};"
+          "xhr.onload=function(){"
+            "if(xhr.status===200){"
+              "bar.value=100;"
+              "st.className='ok';"
+              "st.textContent='Flash successful! Device is rebooting...';"
+            "}else{"
+              "st.className='err';"
+              "st.textContent='Error: '+xhr.responseText;"
+              "btn.disabled=false;"
+            "}"
+          "};"
+          "xhr.onerror=function(){"
+            "st.className='err';"
+            "st.textContent='Upload failed — check device connection';"
+            "btn.disabled=false;"
+          "};"
+          "xhr.send(f);"
+        "}"
+        "</script>"
+        "</body></html>";
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, PAGE, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+/* ── POST /ota/upload ─────────────────────────────────────────────────────── */
+
+#define OTA_BUF_SIZE 4096
+
+static esp_err_t ota_upload_post(httpd_req_t *req)
+{
+    esp_ota_handle_t ota_handle = 0;
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    if (!update_partition) {
+        ESP_LOGE(TAG, "OTA: no update partition found");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No OTA partition");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "OTA: writing to partition '%s' at offset 0x%lx, size 0x%lx",
+             update_partition->label,
+             (unsigned long)update_partition->address,
+             (unsigned long)update_partition->size);
+
+    esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: esp_ota_begin failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA begin failed");
+        return ESP_FAIL;
+    }
+
+    char *buf = malloc(OTA_BUF_SIZE);
+    if (!buf) {
+        esp_ota_abort(ota_handle);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    int remaining = req->content_len;
+    int written   = 0;
+    bool ok       = true;
+
+    ESP_LOGI(TAG, "OTA: firmware size %d bytes", remaining);
+
+    while (remaining > 0) {
+        int to_recv = (remaining < OTA_BUF_SIZE) ? remaining : OTA_BUF_SIZE;
+        int received = httpd_req_recv(req, buf, to_recv);
+        if (received <= 0) {
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) continue;  /* retry on timeout */
+            ESP_LOGE(TAG, "OTA: recv error %d", received);
+            ok = false;
+            break;
+        }
+        err = esp_ota_write(ota_handle, buf, received);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA: write failed: %s", esp_err_to_name(err));
+            ok = false;
+            break;
+        }
+        remaining -= received;
+        written   += received;
+        ESP_LOGD(TAG, "OTA: written %d / %d bytes", written, req->content_len);
+    }
+
+    free(buf);
+
+    if (!ok) {
+        esp_ota_abort(ota_handle);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA write failed");
+        return ESP_FAIL;
+    }
+
+    err = esp_ota_end(ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: esp_ota_end failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            err == ESP_ERR_OTA_VALIDATE_FAILED
+                                ? "Image validation failed — wrong binary?"
+                                : "OTA end failed");
+        return ESP_FAIL;
+    }
+
+    err = esp_ota_set_boot_partition(update_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: set boot partition failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Set boot partition failed");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "OTA: success — %d bytes written, rebooting", written);
+    httpd_resp_sendstr(req, "OK");
+
+    xTaskCreate(reboot_task, "ota_reboot", 1024, NULL, 5, NULL);
     return ESP_OK;
 }
 
@@ -717,7 +935,7 @@ esp_err_t config_server_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable  = true;
-    cfg.max_uri_handlers  = 16;
+    cfg.max_uri_handlers  = 18;
 
     httpd_handle_t server = NULL;
     esp_err_t err = httpd_start(&server, &cfg);
@@ -741,6 +959,8 @@ esp_err_t config_server_start(void)
         { .uri = "/config/mqtt",       .method = HTTP_POST, .handler = config_mqtt_post     },
         { .uri = "/config/modbus",     .method = HTTP_POST, .handler = config_modbus_post   },
         { .uri = "/reboot",            .method = HTTP_POST, .handler = reboot_post          },
+        { .uri = "/ota",               .method = HTTP_GET,  .handler = ota_get              },
+        { .uri = "/ota/upload",        .method = HTTP_POST, .handler = ota_upload_post      },
     };
     for (int i = 0; i < (int)(sizeof(uris) / sizeof(uris[0])); i++) {
         httpd_register_uri_handler(server, &uris[i]);

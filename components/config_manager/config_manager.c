@@ -27,6 +27,8 @@ static bool load_str(nvs_handle_t nvs, const char *key, char *dest, size_t max_l
 
 void config_manager_init(void)
 {
+    bool gpio_tx_set = false, gpio_rx_set = false, gpio_rts_set = false;
+
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
@@ -106,6 +108,39 @@ void config_manager_init(void)
         }
     }
 
+    {
+        uint8_t val;
+        err = nvs_get_u8(nvs, "mb_gpio_tx", &val);
+        if (err == ESP_OK) {
+            g_config.mb_gpio_tx = val; gpio_tx_set = true;
+            ESP_LOGD(TAG, "mb_gpio_tx = %u", g_config.mb_gpio_tx);
+        } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_ERROR_CHECK(err);
+        }
+    }
+
+    {
+        uint8_t val;
+        err = nvs_get_u8(nvs, "mb_gpio_rx", &val);
+        if (err == ESP_OK) {
+            g_config.mb_gpio_rx = val; gpio_rx_set = true;
+            ESP_LOGD(TAG, "mb_gpio_rx = %u", g_config.mb_gpio_rx);
+        } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_ERROR_CHECK(err);
+        }
+    }
+
+    {
+        uint8_t val;
+        err = nvs_get_u8(nvs, "mb_gpio_rts", &val);
+        if (err == ESP_OK) {
+            g_config.mb_gpio_rts = val; gpio_rts_set = true;
+            ESP_LOGD(TAG, "mb_gpio_rts = %u", g_config.mb_gpio_rts);
+        } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_ERROR_CHECK(err);
+        }
+    }
+
     nvs_close(nvs);
 
 apply_defaults:
@@ -128,6 +163,18 @@ apply_defaults:
     if (g_config.pub_interval == 0) {
         g_config.pub_interval = 30;
         ESP_LOGD(TAG, "pub_interval defaulting to %lu", (unsigned long)g_config.pub_interval);
+    }
+    if (!gpio_tx_set) {
+        g_config.mb_gpio_tx = 43;
+        ESP_LOGD(TAG, "mb_gpio_tx defaulting to %u", g_config.mb_gpio_tx);
+    }
+    if (!gpio_rx_set) {
+        g_config.mb_gpio_rx = 44;
+        ESP_LOGD(TAG, "mb_gpio_rx defaulting to %u", g_config.mb_gpio_rx);
+    }
+    if (!gpio_rts_set) {
+        g_config.mb_gpio_rts = 2;
+        ESP_LOGD(TAG, "mb_gpio_rts defaulting to %u", g_config.mb_gpio_rts);
     }
 
     ESP_LOGI(TAG, "init done");
@@ -172,16 +219,20 @@ esp_err_t config_manager_save_wifi(const char *ssid, const char *pass)
 }
 
 esp_err_t config_manager_save_modbus(uint8_t slave_id, uint32_t baud,
-                                     uint32_t poll_interval, uint32_t pub_interval)
+                                     uint32_t poll_interval, uint32_t pub_interval,
+                                     uint8_t gpio_tx, uint8_t gpio_rx, uint8_t gpio_rts)
 {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) return err;
 
-    nvs_set_u8 (nvs, "mb_slave_id", slave_id);
-    nvs_set_u32(nvs, "mb_baud",     baud);
-    nvs_set_u32(nvs, "poll_ivl",    poll_interval);
-    nvs_set_u32(nvs, "pub_ivl",     pub_interval);
+    nvs_set_u8 (nvs, "mb_slave_id",  slave_id);
+    nvs_set_u32(nvs, "mb_baud",      baud);
+    nvs_set_u32(nvs, "poll_ivl",     poll_interval);
+    nvs_set_u32(nvs, "pub_ivl",      pub_interval);
+    nvs_set_u8 (nvs, "mb_gpio_tx",   gpio_tx);
+    nvs_set_u8 (nvs, "mb_gpio_rx",   gpio_rx);
+    nvs_set_u8 (nvs, "mb_gpio_rts",  gpio_rts);
     err = nvs_commit(nvs);
     nvs_close(nvs);
 
@@ -190,9 +241,13 @@ esp_err_t config_manager_save_modbus(uint8_t slave_id, uint32_t baud,
         g_config.mb_baud       = baud;
         g_config.poll_interval = poll_interval;
         g_config.pub_interval  = pub_interval;
-        ESP_LOGI(TAG, "modbus config saved: slave=%u baud=%lu poll=%lus pub=%lus",
+        g_config.mb_gpio_tx    = gpio_tx;
+        g_config.mb_gpio_rx    = gpio_rx;
+        g_config.mb_gpio_rts   = gpio_rts;
+        ESP_LOGI(TAG, "modbus config saved: slave=%u baud=%lu poll=%lus pub=%lus tx=%u rx=%u rts=%u",
                  slave_id, (unsigned long)baud,
-                 (unsigned long)poll_interval, (unsigned long)pub_interval);
+                 (unsigned long)poll_interval, (unsigned long)pub_interval,
+                 gpio_tx, gpio_rx, gpio_rts);
     }
     return err;
 }

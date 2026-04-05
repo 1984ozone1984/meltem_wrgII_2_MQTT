@@ -61,7 +61,8 @@ typedef struct {
 } wrg2_data_t;
 
 /** Initialize UART/Modbus driver. Must be called before wrg2_read_all(). */
-esp_err_t wrg2_driver_init(uint8_t slave_id, uint32_t baud);
+esp_err_t wrg2_driver_init(uint8_t slave_id, uint32_t baud,
+                            int gpio_tx, int gpio_rx, int gpio_rts);
 
 /**
  * Read all registers from the M-WRG-II (9 burst reads, retries 3× each).

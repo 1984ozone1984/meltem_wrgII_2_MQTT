@@ -5,13 +5,7 @@
 
 static const char *TAG = "wrg2_driver";
 
-/* UART hardware — XIAO ESP32-S3 + MAX485
- * TX  → GPIO43  RX  → GPIO44  DE/RE → GPIO2 (auto via UART RTS)
- */
 #define WRG2_UART_PORT  UART_NUM_1
-#define WRG2_GPIO_TX    43
-#define WRG2_GPIO_RX    44
-#define WRG2_GPIO_RTS   2
 
 /* -----------------------------------------------------------------------
  * Register map — M-WRG-II uses LITERAL PDU addresses.
@@ -105,14 +99,15 @@ static float regs_to_float(const uint16_t *r)
     return f;
 }
 
-esp_err_t wrg2_driver_init(uint8_t slave_id, uint32_t baud)
+esp_err_t wrg2_driver_init(uint8_t slave_id, uint32_t baud,
+                           int gpio_tx, int gpio_rx, int gpio_rts)
 {
     s_slave = slave_id;
-    esp_err_t err = modbus_rtu_init(WRG2_UART_PORT, WRG2_GPIO_TX, WRG2_GPIO_RX,
-                                    WRG2_GPIO_RTS, baud);
+    esp_err_t err = modbus_rtu_init(WRG2_UART_PORT, gpio_tx, gpio_rx, gpio_rts, baud);
     if (err != ESP_OK) return err;
 
-    ESP_LOGI(TAG, "init slave=%u baud=%lu", slave_id, (unsigned long)baud);
+    ESP_LOGI(TAG, "init slave=%u baud=%lu tx=%d rx=%d rts=%d",
+             slave_id, (unsigned long)baud, gpio_tx, gpio_rx, gpio_rts);
     return ESP_OK;
 }
 

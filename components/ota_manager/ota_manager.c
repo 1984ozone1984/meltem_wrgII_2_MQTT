@@ -61,6 +61,19 @@ void ota_manager_handle_trigger(const char *url)
     strncpy(url_copy, url, OTA_URL_MAX_LEN - 1);
     url_copy[OTA_URL_MAX_LEN - 1] = '\0';
 
+    /* Trim trailing whitespace/newlines (MQTT Explorer appends \n) */
+    int len = (int)strlen(url_copy);
+    while (len > 0 && (url_copy[len - 1] == '\n' || url_copy[len - 1] == '\r' ||
+                        url_copy[len - 1] == ' '  || url_copy[len - 1] == '\t')) {
+        url_copy[--len] = '\0';
+    }
+    if (len == 0) {
+        ESP_LOGW(TAG, "URL empty after trimming, ignoring");
+        free(url_copy);
+        return;
+    }
+    ESP_LOGI(TAG, "OTA URL: '%s'", url_copy);
+
     BaseType_t res = xTaskCreate(ota_task, "ota_task", OTA_TASK_STACK,
                                  url_copy, OTA_TASK_PRIO, NULL);
     if (res != pdPASS) {
