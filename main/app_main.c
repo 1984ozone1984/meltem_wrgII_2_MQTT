@@ -11,6 +11,8 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -134,6 +136,32 @@ static void publish_status(const wrg2_data_t *d)
 #undef PUB
 }
 
+/* ── Diagnostics publishing ────────────────────────────────────────────────
+ * Device health that doesn't come from Modbus. Published alongside status so
+ * WiFi stability can be judged remotely:
+ *   uptime         → resets to ~0 on any reboot (supervisor or crash)
+ *   free_heap      → trend reveals a memory leak; flat = healthy
+ *   free_heap_min  → lowest free heap ever seen since boot
+ *   wifi_rssi      → tells environmental drops apart from firmware drops
+ * ----------------------------------------------------------------------- */
+static void publish_diagnostics(void)
+{
+    char buf[32];
+
+    snprintf(buf, sizeof(buf), "%lld",
+             (long long)(esp_timer_get_time() / 1000000));
+    mqtt_publish("wrg2/status/uptime", buf, 1, 1);
+
+    snprintf(buf, sizeof(buf), "%u", (unsigned)esp_get_free_heap_size());
+    mqtt_publish("wrg2/status/free_heap", buf, 1, 1);
+
+    snprintf(buf, sizeof(buf), "%u", (unsigned)esp_get_minimum_free_heap_size());
+    mqtt_publish("wrg2/status/free_heap_min", buf, 1, 1);
+
+    snprintf(buf, sizeof(buf), "%d", wifi_manager_get_rssi());
+    mqtt_publish("wrg2/status/wifi_rssi", buf, 1, 1);
+}
+
 /* ── Change detection ──────────────────────────────────────────────────── */
 
 static bool data_changed(const wrg2_data_t *a, const wrg2_data_t *b)
@@ -209,6 +237,7 @@ static void polling_task(void *arg)
                     ESP_LOGI(TAG, "value changed — publishing immediately");
                 }
                 publish_status(&data);
+                publish_diagnostics();
                 last_pub  = data;
                 pub_valid = true;
                 secs_since_pub = 0;

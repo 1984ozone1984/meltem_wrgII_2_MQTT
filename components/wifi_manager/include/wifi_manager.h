@@ -26,3 +26,6 @@ void wifi_manager_get_ip(char *buf, size_t len);
 
 /** Copies the AP SSID string into buf. */
 void wifi_manager_get_ap_ssid(char *buf, size_t len);
+
+/** Current STA RSSI in dBm, or 0 if not connected / unknown. */
+int wifi_manager_get_rssi(void);

@@ -313,3 +313,12 @@ void wifi_manager_get_ap_ssid(char *buf, size_t len)
         buf[len - 1] = '\0';
     }
 }
+
+int wifi_manager_get_rssi(void)
+{
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        return ap.rssi;
+    }
+    return 0;   /* not connected / unknown */
+}

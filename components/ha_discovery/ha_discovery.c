@@ -176,6 +176,44 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_btn_reboot\"," DEV "}");
     pub("homeassistant/button/wrg2_btn_reboot/config", buf);
 
+    /* Device health — for judging WiFi/memory stability remotely */
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Uptime\","
+        "\"state_topic\":\"wrg2/status/uptime\","
+        "\"unit_of_measurement\":\"s\",\"device_class\":\"duration\","
+        "\"state_class\":\"measurement\","
+        DIAG
+        "\"unique_id\":\"wrg2_uptime\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_uptime/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Free Heap\","
+        "\"state_topic\":\"wrg2/status/free_heap\","
+        "\"unit_of_measurement\":\"B\",\"device_class\":\"data_size\","
+        "\"state_class\":\"measurement\","
+        DIAG
+        "\"unique_id\":\"wrg2_free_heap\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_free_heap/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"Free Heap Minimum\","
+        "\"state_topic\":\"wrg2/status/free_heap_min\","
+        "\"unit_of_measurement\":\"B\",\"device_class\":\"data_size\","
+        "\"state_class\":\"measurement\","
+        DIAG
+        "\"unique_id\":\"wrg2_free_heap_min\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_free_heap_min/config", buf);
+
+    snprintf(buf, sizeof(buf),
+        "{\"name\":\"WiFi Signal\","
+        "\"state_topic\":\"wrg2/status/wifi_rssi\","
+        "\"unit_of_measurement\":\"dBm\",\"device_class\":\"signal_strength\","
+        "\"state_class\":\"measurement\","
+        DIAG
+        "\"unique_id\":\"wrg2_wifi_rssi\"," DEV "}");
+    pub("homeassistant/sensor/wrg2_wifi_rssi/config", buf);
+
     /* ════════════════════════════════════════════════════════════════════════
      * CONTROL  (main card)
      * ════════════════════════════════════════════════════════════════════════ */
@@ -294,5 +332,5 @@ void ha_discovery_publish(void)
         "\"unique_id\":\"wrg2_cfg_ext_off\"," DEV "}");
     pub("homeassistant/number/wrg2_cfg_ext_off/config", buf);
 
-    ESP_LOGI(TAG, "discovery: 14 deleted, 26 published");
+    ESP_LOGI(TAG, "discovery: 30 entities published");
 }

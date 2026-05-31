@@ -54,7 +54,7 @@ cd build && python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 \
 | `modbus_rtu` | ✅ | Direct UART driver, FC03 read, FC06 write, CRC16, 3× retry, mutex |
 | `wrg2_driver` | ✅ | 9-burst register map, wrg2_read_all(), wrg2_set_mode*(), wrg2_write_config() |
 | `mqtt_manager` | ✅ | MQTT client, LWT, subscriptions, HA discovery on every connect |
-| `ha_discovery` | ✅ | 26 entities, entity_category grouping, stale entity cleanup |
+| `ha_discovery` | ✅ | 30 entities (incl. uptime/free_heap/free_heap_min/wifi_rssi health), entity_category grouping |
 | `ota_manager` | ✅ | HTTP OTA via wrg2/ota/trigger |
 | `app_main` | ✅ | polling_task + control_task, publish interval gating |
 
@@ -146,6 +146,10 @@ Register map has gaps — burst reads across undefined addresses return exceptio
 | `wrg2/config/ext_fan_level` | integer % |
 | `wrg2/config/ext_on_delay` | integer min |
 | `wrg2/config/ext_off_delay` | integer min |
+| `wrg2/status/uptime` | integer s (resets on reboot) |
+| `wrg2/status/free_heap` | integer bytes |
+| `wrg2/status/free_heap_min` | integer bytes (min ever) |
+| `wrg2/status/wifi_rssi` | integer dBm |
 
 ### Subscribed (control)
 
@@ -166,11 +170,11 @@ Register map has gaps — burst reads across undefined addresses return exceptio
 
 ---
 
-## HA Discovery Entities (26 total)
+## HA Discovery Entities (30 total)
 
 **Main card:** 4 temp sensors, extract/supply humidity, supply/exhaust fan speed, Switch Off button, Humidity Control button, Manual Balanced Fan number, Unbalanced Supply Fan number, Unbalanced Exhaust Fan number
 
-**Diagnostic section:** Operating Mode sensor, Error binary_sensor, Filter Due binary_sensor, Frost Protection binary_sensor, Filter Days Remaining sensor, Device Operating Hours sensor, Motor Operating Hours sensor, Reboot button
+**Diagnostic section:** Operating Mode sensor, Error binary_sensor, Filter Due binary_sensor, Frost Protection binary_sensor, Filter Days Remaining sensor, Device Operating Hours sensor, Motor Operating Hours sensor, Reboot button, Uptime sensor, Free Heap sensor, Free Heap Minimum sensor, WiFi Signal sensor
 
 **Configuration section:** Humidity Start Setpoint number (42000), Humidity Min Fan Level number (42001), Humidity Max Fan Level number (42002), Ext Input Fan Level number (42007), Ext Input On Delay number (42008), Ext Input Off Delay number (42009)
 
