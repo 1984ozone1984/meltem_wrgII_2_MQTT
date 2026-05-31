@@ -16,6 +16,7 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_system.h"
 
 #include "wifi_manager.h"
 #include "config_manager.h"
@@ -27,19 +28,26 @@ static const char *TAG = "wifi_manager";
 #define WIFI_FAIL_BIT       BIT1
 
 #define STA_TIMEOUT_S       30
-#define STA_MAX_RETRIES     10
+#define STA_MAX_RETRIES     10   /* fast back-to-back retries before pacing kicks in */
 #define AP_SSID             "WRG2-Setup"
 #define AP_CHANNEL          6
 #define AP_MAX_CONN         4
 #define AP_IP               "192.168.4.1"
 
-static EventGroupHandle_t s_evt_group  = NULL;
-static esp_netif_t       *s_sta_netif  = NULL;
-static esp_netif_t       *s_ap_netif   = NULL;
-static bool               s_connected  = false;
-static bool               s_ap_mode    = false;
-static int                s_retry      = 0;
-static char               s_ip[16]     = {0};
+/* Supervisor task — guarantees recovery from any wedged state (lost link, hung
+ * supplicant, heap exhaustion). Runs forever once STA is provisioned. */
+#define SUPERVISOR_PERIOD_S   10   /* how often the supervisor checks link state   */
+#define RECONNECT_EVERY_S     30   /* force a fresh connect attempt at this cadence */
+#define REBOOT_AFTER_S        600  /* offline this long → self-reboot to recover    */
+
+static EventGroupHandle_t s_evt_group   = NULL;
+static esp_netif_t       *s_sta_netif   = NULL;
+static esp_netif_t       *s_ap_netif    = NULL;
+static bool               s_connected   = false;
+static bool               s_ap_mode     = false;
+static bool               s_provisioned = false;  /* got an IP at least once → creds good */
+static int                s_retry       = 0;
+static char               s_ip[16]      = {0};
 
 /* ── Event handler ──────────────────────────────────────────────────────────── */
 
@@ -57,12 +65,20 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
                 s_connected = false;
                 s_ip[0] = '\0';
                 if (s_retry < STA_MAX_RETRIES) {
+                    /* Fast back-to-back retries — recovers quickly from brief drops */
                     s_retry++;
                     ESP_LOGI(TAG, "Retry %d/%d...", s_retry, STA_MAX_RETRIES);
                     esp_wifi_connect();
-                } else {
+                } else if (!s_provisioned) {
+                    /* Never connected since boot → likely bad credentials.
+                     * Signal wifi_manager_start() to fall back to AP provisioning. */
                     ESP_LOGW(TAG, "Connection failed after %d retries", STA_MAX_RETRIES);
                     xEventGroupSetBits(s_evt_group, WIFI_FAIL_BIT);
+                } else {
+                    /* We were online before → transient outage. Stop hammering the
+                     * supplicant here; the supervisor task drives paced reconnects
+                     * and will reboot the device if the outage persists. */
+                    ESP_LOGW(TAG, "Link lost — supervisor will keep reconnecting");
                 }
                 break;
 
@@ -93,9 +109,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         ip_event_got_ip_t *ev = event_data;
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&ev->ip_info.ip));
         ESP_LOGI(TAG, "Got IP: %s", s_ip);
-        s_retry     = 0;
-        s_connected = true;
-        s_ap_mode   = false;
+        s_retry       = 0;
+        s_connected   = true;
+        s_ap_mode     = false;
+        s_provisioned = true;   /* creds proven good → enable infinite reconnect */
         xEventGroupSetBits(s_evt_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -167,6 +184,48 @@ static esp_err_t start_sta(void)
     return ESP_OK;
 }
 
+/* ── Connection supervisor ──────────────────────────────────────────────────
+ * Runs forever. Once STA has been provisioned, it guarantees the device never
+ * stays offline indefinitely:
+ *   • paces reconnect attempts (every RECONNECT_EVERY_S) without hammering, and
+ *   • self-reboots after REBOOT_AFTER_S so a wedged WiFi/lwIP stack or heap
+ *     exhaustion always recovers cleanly.
+ * Idle while in AP provisioning mode or before the first successful connect.
+ * ----------------------------------------------------------------------------- */
+static void supervisor_task(void *arg)
+{
+    uint32_t offline_s    = 0;
+    uint32_t since_kick_s = 0;
+
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(SUPERVISOR_PERIOD_S * 1000));
+
+        if (s_ap_mode || !s_provisioned) {
+            offline_s = since_kick_s = 0;
+            continue;
+        }
+        if (s_connected) {
+            offline_s = since_kick_s = 0;
+            continue;
+        }
+
+        offline_s    += SUPERVISOR_PERIOD_S;
+        since_kick_s += SUPERVISOR_PERIOD_S;
+
+        if (since_kick_s >= RECONNECT_EVERY_S) {
+            since_kick_s = 0;
+            ESP_LOGW(TAG, "Offline %lus — forcing reconnect", (unsigned long)offline_s);
+            esp_wifi_disconnect();   /* clear any half-open state */
+            esp_wifi_connect();
+        }
+
+        if (offline_s >= REBOOT_AFTER_S) {
+            ESP_LOGE(TAG, "Offline %lus — rebooting to recover", (unsigned long)offline_s);
+            esp_restart();
+        }
+    }
+}
+
 /* ── Public API ─────────────────────────────────────────────────────────────── */
 
 void wifi_manager_init(void)
@@ -189,6 +248,10 @@ void wifi_manager_init(void)
         WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, NULL));
+
+    /* Connection supervisor — idle until STA is provisioned, then keeps the
+     * link alive and self-reboots on a persistent outage. */
+    xTaskCreate(supervisor_task, "wifi_sup", 2560, NULL, 4, NULL);
 
     ESP_LOGI(TAG, "init done");
 }

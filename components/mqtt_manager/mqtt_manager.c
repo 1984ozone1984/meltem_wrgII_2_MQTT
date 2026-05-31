@@ -162,7 +162,14 @@ void mqtt_manager_init(void)
         .session.last_will.msg                   = "offline",
         .session.last_will.qos                   = 1,
         .session.last_will.retain                = 1,
+        /* Detect a dead broker/link quickly so we stop queueing QoS-1 publishes
+         * into the heap-backed outbox during an outage. */
+        .session.keepalive                       = 30,
         .network.reconnect_timeout_ms            = 5000,
+        /* Cap the outbox so a WiFi/broker outage can never grow the heap without
+         * bound (≈25 retained QoS-1 publishes every pub_interval). Once full,
+         * the oldest queued messages are dropped instead of leaking memory. */
+        .outbox.limit                            = 8 * 1024,
     };
 
     s_client = esp_mqtt_client_init(&mqtt_cfg);

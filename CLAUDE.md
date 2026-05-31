@@ -49,7 +49,7 @@ cd build && python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 \
 |-----------|--------|-------|
 | `system_core` | ✅ | NVS init, task watchdog 60s timeout, trigger_panic=true |
 | `config_manager` | ✅ | NVS namespace `wrg2_cfg`, all fields including pub_interval |
-| `wifi_manager` | ✅ | STA → AP fallback, mDNS, AT country code, full TX power |
+| `wifi_manager` | ✅ | STA → AP fallback, mDNS, AT country code, full TX power, infinite reconnect + supervisor self-reboot |
 | `config_server` | ✅ | HTTP portal port 80, all config forms + control page |
 | `modbus_rtu` | ✅ | Direct UART driver, FC03 read, FC06 write, CRC16, 3× retry, mutex |
 | `wrg2_driver` | ✅ | 9-burst register map, wrg2_read_all(), wrg2_set_mode*(), wrg2_write_config() |
@@ -64,6 +64,8 @@ cd build && python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 \
 - **Watchdog**: polling_task subscribed to TWDT (60s). Modbus UART hang → panic-reset.
 - **Reboot**: via web UI button, MQTT `wrg2/control/reboot`, or HA button entity.
 - **WiFi AP fix**: `esp_wifi_set_country_code("AT", false)` + `esp_wifi_set_max_tx_power(78)` needed for full TX power in IDF 5.x.
+- **WiFi long-run stability** (fixes "WiFi dies after 12–24 h"): disconnect handler does 10 fast retries, then — once provisioned (got IP at least once) — **never gives up**; the `wifi_sup` supervisor task paces reconnects every 30 s and `esp_restart()`s after 600 s offline. Old code set `WIFI_FAIL_BIT` and stopped reconnecting forever after 10 drops. `s_provisioned` flag gates this so bad credentials still fall back to AP mode at boot.
+- **MQTT outbox cap**: `.outbox.limit = 8 KB` + `.session.keepalive = 30` prevent unbounded heap growth from queued QoS-1 retained publishes during a WiFi/broker outage (the "memory overload" failure mode).
 
 ---
 
