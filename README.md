@@ -27,11 +27,14 @@ Wiring:
 - **Sensor readout** — 4 temperatures, 2 humidity sensors, actual fan throughputs, error/filter/frost flags, operating hours, filter days remaining
 - **Full control** — Off, Humidity (auto) mode, balanced manual fan, unbalanced supply/exhaust fan independently
 - **Config writes** — humidity setpoint, fan range limits, external input delays writable from HA
-- **Watchdog** — task watchdog (60 s timeout) monitors the polling loop and triggers a panic-reset if the Modbus UART hangs
+- **Resilient WiFi** — once provisioned, the device reconnects indefinitely (no give-up after N retries); a supervisor task paces reconnects and self-reboots after a sustained outage so it always recovers from a wedged WiFi/lwIP stack
+- **Bounded memory** — MQTT outbox capped and a short keepalive prevent unbounded heap growth from queued QoS-1 publishes during an outage
+- **Health diagnostics** — uptime, free heap (current + minimum), and WiFi RSSI published as sensors so long-run stability can be judged remotely without a serial console
+- **Watchdog** — task watchdog monitors the polling loop and triggers a panic-reset if the Modbus UART hangs
 - **Remote reboot** — reboot button in HA and via MQTT topic `wrg2/control/reboot`
-- **Home Assistant auto-discovery** — 26 entities grouped into sections (Temperatures, Air Quality, Status & Maintenance, Controls, Configuration); stale entities from previous firmware versions are cleaned up automatically
-- **Web portal** — always-on HTTP status dashboard and control page at `http://<hostname>.local`
-- **OTA updates** — firmware update via MQTT trigger topic
+- **Home Assistant auto-discovery** — 30 entities grouped into sections (Temperatures, Air Quality, Status & Maintenance, Controls, Configuration)
+- **Web portal** — always-on HTTP status dashboard and control page at `http://<hostname>.local`, including web OTA upload
+- **OTA updates** — firmware update via web upload or MQTT trigger topic
 - **WiFi provisioning** — falls back to AP mode (`WRG2-Setup`) on first boot or failed STA connection
 
 ---
@@ -42,14 +45,16 @@ Entities are grouped on the HA device page by `entity_category`:
 
 ### Temperatures & Air Quality — main card
 
+Sensor names follow the German Meltem register labels (Zuluft = supply, Abluft = extract, Fortluft = exhaust, Außenluft = outdoor).
+
 | Entity | Type | Topic |
 |--------|------|-------|
-| Supply Air Temperature | sensor (°C) | `wrg2/status/temperature_supply` |
-| Extract Air Temperature | sensor (°C) | `wrg2/status/temperature_extract` |
-| Exhaust Air Temperature | sensor (°C) | `wrg2/status/temperature_exhaust` |
-| Outdoor Air Temperature | sensor (°C) | `wrg2/status/temperature_outdoor` |
-| Extract Air Humidity | sensor (%) | `wrg2/status/humidity_extract` |
-| Supply Air Humidity | sensor (%) | `wrg2/status/humidity_supply` |
+| Zulufttemperatur (supply) | sensor (°C) | `wrg2/status/temperature_zuluft` |
+| Ablufttemperatur (extract) | sensor (°C) | `wrg2/status/temperature_abluft` |
+| Fortlufttemperatur (exhaust) | sensor (°C) | `wrg2/status/temperature_fortluft` |
+| Außenlufttemperatur (outdoor) | sensor (°C) | `wrg2/status/temperature_aussenluft` |
+| Feuchte Abluft (extract) | sensor (%) | `wrg2/status/feuchte_abluft` |
+| Feuchte Zuluft (supply) | sensor (%) | `wrg2/status/feuchte_zuluft` |
 | Supply Fan Speed | sensor (m³/h) | `wrg2/status/fan_supply_m3h` |
 | Exhaust Fan Speed | sensor (m³/h) | `wrg2/status/fan_exhaust_m3h` |
 
@@ -74,6 +79,10 @@ Entities are grouped on the HA device page by `entity_category`:
 | Filter Days Remaining | sensor (d) | `wrg2/status/filter_days_left` |
 | Device Operating Hours | sensor (h) | `wrg2/status/hours_device` |
 | Motor Operating Hours | sensor (h) | `wrg2/status/hours_motors` |
+| Uptime | sensor (s) | `wrg2/status/uptime` |
+| Free Heap | sensor (B) | `wrg2/status/free_heap` |
+| Free Heap Minimum | sensor (B) | `wrg2/status/free_heap_min` |
+| WiFi Signal | sensor (dBm) | `wrg2/status/wifi_rssi` |
 | Reboot | button (restart) | `wrg2/control/reboot` |
 
 ### Humidity Control Config — Configuration section
@@ -101,12 +110,12 @@ Entities are grouped on the HA device page by `entity_category`:
 | Topic | Payload |
 |-------|---------|
 | `wrg2/availability` | `online` / `offline` (LWT) |
-| `wrg2/status/temperature_supply` | float (°C) |
-| `wrg2/status/temperature_extract` | float (°C) |
-| `wrg2/status/temperature_exhaust` | float (°C) |
-| `wrg2/status/temperature_outdoor` | float (°C) |
-| `wrg2/status/humidity_extract` | integer (%) |
-| `wrg2/status/humidity_supply` | integer (%) |
+| `wrg2/status/temperature_zuluft` | float (°C) — supply |
+| `wrg2/status/temperature_abluft` | float (°C) — extract |
+| `wrg2/status/temperature_fortluft` | float (°C) — exhaust |
+| `wrg2/status/temperature_aussenluft` | float (°C) — outdoor |
+| `wrg2/status/feuchte_abluft` | integer (%) — extract |
+| `wrg2/status/feuchte_zuluft` | integer (%) — supply |
 | `wrg2/status/fan_supply_m3h` | integer (m³/h) |
 | `wrg2/status/fan_exhaust_m3h` | integer (m³/h) |
 | `wrg2/status/fan_supply_target` | integer (m³/h) |
@@ -124,6 +133,10 @@ Entities are grouped on the HA device page by `entity_category`:
 | `wrg2/config/ext_fan_level` | integer (%) |
 | `wrg2/config/ext_on_delay` | integer (min) |
 | `wrg2/config/ext_off_delay` | integer (min) |
+| `wrg2/status/uptime` | integer (s) — resets to ~0 on reboot |
+| `wrg2/status/free_heap` | integer (bytes) |
+| `wrg2/status/free_heap_min` | integer (bytes) — minimum ever since boot |
+| `wrg2/status/wifi_rssi` | integer (dBm) |
 
 ### Control (subscribe)
 
@@ -169,6 +182,24 @@ After connecting to your network, the device is reachable at `http://<hostname>.
 | Publish Interval | `30` | Seconds — how often to send values to MQTT (≥ poll interval) |
 
 All settings are stored in ESP32 NVS flash — no credentials in firmware.
+
+---
+
+## Monitoring Stability
+
+The Diagnostic section exposes four health sensors so long-run WiFi and memory
+behaviour can be judged from Home Assistant alone — no serial console needed:
+
+| Sensor | What it tells you |
+|--------|-------------------|
+| **Uptime** | Rises steadily while the device stays up; a reset toward 0 means it rebooted. A reset paired with a ~10 min availability gap is the supervisor self-reboot recovering from an outage. |
+| **Free Heap** | Flat over days = healthy. A steady downward trend indicates a memory leak. |
+| **Free Heap Minimum** | Lowest free heap since boot; should settle and stop dropping. |
+| **WiFi Signal** | Separates environmental drops (weak/fluctuating RSSI, below ≈ −75 dBm) from firmware issues. |
+
+Graph **Uptime** and **Free Heap** over a few days for an unambiguous verdict.
+Device availability transitions are also logged in the HA device Logbook via the
+retained `wrg2/availability` LWT topic.
 
 ---
 
